@@ -11,8 +11,39 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+pending-uploads
+pending-uploads/**
 
-# Editor directories and files
+# Server-side private data + vault UGC
+data/catalog.json
+data/catalog.json.tmp
+data/settings.json
+data/bans.json
+data/audit.jsonl
+data/reactions/
+data/reactions/**
+
+# Accepted community uploads (keep seed vault assets)
+vault/media/a_*
+vault/video/a_*
+vault/media/p_*
+vault/video/p_*
+
+# Legacy public media must stay empty
+public/media/**
+!public/media/.gitkeep
+public/video/**
+!public/video/.gitkeep
+public/sfx/**
+!public/sfx/.gitkeep
+public/media-index.json
+public/video-index.json
+
+# Generated obfuscated admin
+server/admin-ui/admin.obf.js
+
+# Editor
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -22,3 +53,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.tmp

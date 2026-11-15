@@ -2,6 +2,14 @@ import './style.css'
 import { armHaunt, jumpscare, play } from './audio/haunt'
 import { askWebcamPossession, closeWebcam } from './webcam'
 import {
+  startDread,
+  onDreadScroll,
+  dreadIntensity,
+  setDreadMultiplier,
+  setAmbientEnabled,
+  stopDread,
+} from './dread'
+import {
   loadAllPhotos,
   loadAllVideos,
   buildCaseDump,
@@ -13,11 +21,14 @@ import {
 import { MediaPool } from './pool'
 import { mountUploadButton } from './upload'
 import { installGuards } from './guard'
+import { enableTileDrag, resetDragLayer } from './drag'
+import { loadBoot, bootFaces, bootSfx } from './boot'
 
 const root = document.querySelector<HTMLDivElement>('#app')!
-const MAX_STRIPS = 6
+const MAX_STRIPS = 5
 const MAX_PLAYING_VIDEOS = 2
-const TILES_PER_STRIP = 18
+const TILES_PER_STRIP = 14
+const SPACER_CAP_VH = 8
 
 const photoPool = new MediaPool<PhotoStory>()
 const videoPool = new MediaPool<FeedVid>()
@@ -29,12 +40,25 @@ let chaosEl: HTMLElement | null = null
 let spacerEl: HTMLElement | null = null
 let removedHeight = 0
 let lastScrollScare = 0
+let lastScrollCheck = 0
 let appending = false
 let playingVideos = new Set<HTMLVideoElement>()
 let sentinelObserver: IntersectionObserver | null = null
+let casesPromise: Promise<MurderFile[]> | null = null
 
 function pick<T>(arr: T[]) {
   return arr[Math.floor(Math.random() * arr.length)]
+}
+
+function ensureCases() {
+  if (CASES.length) return Promise.resolve(CASES)
+  if (!casesPromise) {
+    casesPromise = Promise.resolve().then(() => {
+      CASES = buildCaseDump(400)
+      return CASES
+    })
+  }
+  return casesPromise
 }
 
 function closeTear() {
@@ -48,9 +72,15 @@ document.addEventListener('keydown', (e) => {
   }
 })
 
-function openPhotoStory(p: PhotoStory) {
+function openMediaStory(opts: {
+  src: string
+  title: string
+  rating: string
+  story: string
+  kind: 'photo' | 'video'
+}) {
   closeTear()
-  void play('/sfx/creak.wav', 0.2)
+  void play(opts.kind === 'video' ? bootSfx('static') : bootSfx('creak'), 0.2)
   const tear = document.createElement('div')
   tear.className = 'tear'
   const inner = document.createElement('div')
@@ -60,21 +90,41 @@ function openPhotoStory(p: PhotoStory) {
   x.className = 'tear-x'
   x.textContent = 'x'
   x.onclick = () => closeTear()
-  const img = document.createElement('img')
-  img.className = 'hero'
-  img.src = p.src
-  img.alt = ''
-  img.decoding = 'async'
+
+  let media: HTMLElement
+  if (opts.kind === 'video') {
+    const vid = document.createElement('video')
+    vid.className = 'hero'
+    vid.src = opts.src
+    vid.controls = true
+    vid.playsInline = true
+    vid.loop = true
+    vid.autoplay = true
+    vid.muted = false
+    media = vid
+    void vid.play().catch(() => {
+      vid.muted = true
+      void vid.play().catch(() => {})
+    })
+  } else {
+    const img = document.createElement('img')
+    img.className = 'hero'
+    img.src = opts.src
+    img.alt = ''
+    img.decoding = 'async'
+    media = img
+  }
+
   const h = document.createElement('h3')
   h.className = 'gothic'
-  h.textContent = p.title
+  h.textContent = opts.title
   const rating = document.createElement('div')
   rating.className = 'rating'
-  rating.textContent = p.rating
+  rating.textContent = opts.rating
   const body = document.createElement('div')
   body.className = 'body'
-  body.textContent = p.story
-  inner.append(x, img, h, rating, body)
+  body.textContent = opts.story || 'No description filed.'
+  inner.append(x, media, h, rating, body)
   tear.appendChild(inner)
   tear.addEventListener('click', (e) => {
     if (e.target === tear) closeTear()
@@ -82,9 +132,29 @@ function openPhotoStory(p: PhotoStory) {
   document.body.appendChild(tear)
 }
 
+function openPhotoStory(p: PhotoStory) {
+  openMediaStory({
+    src: p.src,
+    title: p.title,
+    rating: p.rating,
+    story: p.story,
+    kind: 'photo',
+  })
+}
+
+function openVideoStory(v: FeedVid) {
+  openMediaStory({
+    src: v.src,
+    title: v.title || v.label,
+    rating: v.rating,
+    story: v.story,
+    kind: 'video',
+  })
+}
+
 function openMurder(m: MurderFile) {
   closeTear()
-  void play('/sfx/heartbeat.wav', 0.2)
+  void play(bootSfx('heartbeat'), 0.2)
   const tear = document.createElement('div')
   tear.className = 'tear'
   const inner = document.createElement('div')
@@ -118,24 +188,25 @@ function behindOverlay() {
   lbl.className = 'lbl'
   lbl.textContent = 'behind you'
   const img = document.createElement('img')
-  img.src = pick([
-    '/media/nv-silhouette.jpg',
-    '/media/hall-entity.jpg',
-    '/media/closet-eyes.jpg',
-    '/media/jumpscare-face.jpg',
-  ])
+  const faces = bootFaces()
+  if (!faces.length) return
+  img.src = pick(faces)
   img.alt = ''
   el.append(lbl, img)
   document.body.appendChild(el)
-  void play('/sfx/ghost2.wav', 0.3)
+  void play(bootSfx('ghost2') || bootSfx('ghost'), 0.3)
   setTimeout(() => el.remove(), 1400)
 }
 
-function trackVideo(strip: HTMLElement, vid: HTMLVideoElement) {
+function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, src: string) {
   const io = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
         if (e.isIntersecting) {
+          if (!vid.getAttribute('src')) {
+            vid.setAttribute('src', src)
+            vid.load()
+          }
           if (playingVideos.size >= MAX_PLAYING_VIDEOS) {
             const first = playingVideos.values().next().value
             if (first && first !== vid) {
@@ -148,10 +219,19 @@ function trackVideo(strip: HTMLElement, vid: HTMLVideoElement) {
         } else {
           vid.pause()
           playingVideos.delete(vid)
+          // drop decoded frames when far off-screen
+          if (e.intersectionRatio === 0 && e.boundingClientRect.bottom < -400) {
+            vid.removeAttribute('src')
+            try {
+              vid.load()
+            } catch {
+              /* ignore */
+            }
+          }
         }
       }
     },
-    { threshold: 0.25, rootMargin: '40px' },
+    { threshold: 0.2, rootMargin: '120px' },
   )
   io.observe(vid)
   const bag = (strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos || []
@@ -166,7 +246,9 @@ function destroyStrip(strip: HTMLElement) {
     v.removeAttribute('src')
     try {
       v.load()
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   })
   const bag = (strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos
   bag?.forEach((o) => o.disconnect())
@@ -174,8 +256,8 @@ function destroyStrip(strip: HTMLElement) {
 }
 
 /**
- * Recycle only strips fully above the viewport.
- * Preserve document height with a top spacer so scroll never jumps or locks.
+ * Recycle strips fully above the viewport.
+ * Spacer preserves scroll position, capped so document height cannot grow forever.
  */
 function recycleStrips() {
   if (!chaosEl || !spacerEl) return
@@ -184,25 +266,42 @@ function recycleStrips() {
 
   const keepFromBottom = MAX_STRIPS
   const removable = strips.slice(0, Math.max(0, strips.length - keepFromBottom))
+  const spacerCap = window.innerHeight * SPACER_CAP_VH
+
   for (const strip of removable) {
     const rect = strip.getBoundingClientRect()
-    // only remove if completely above viewport with buffer
-    if (rect.bottom > -200) break
+    if (rect.bottom > -160) break
     const h = strip.offsetHeight || rect.height || window.innerHeight
-    removedHeight += h
-    spacerEl.style.height = removedHeight + 'px'
+    if (removedHeight + h <= spacerCap) {
+      removedHeight += h
+      spacerEl.style.height = removedHeight + 'px'
+    } else {
+      // collapse excess: drop height and jump scroll by the same amount
+      const overflow = removedHeight + h - spacerCap
+      const prev = window.scrollY
+      removedHeight = spacerCap
+      spacerEl.style.height = removedHeight + 'px'
+      destroyStrip(strip)
+      window.scrollTo(0, Math.max(0, prev - overflow))
+      continue
+    }
     destroyStrip(strip)
   }
+}
+
+function pickKind(): 'photo' | 'video' | 'case' | 'ask' {
+  const kindRoll = Math.random()
+  // rarest checks first — previously video (>=0.76) ate case/ask forever
+  if (kindRoll > 0.985 && !webcamAsked && stripN > 3) return 'ask'
+  if (kindRoll > 0.9) return 'case'
+  if (kindRoll > 0.76) return 'video'
+  return 'photo'
 }
 
 function layoutStrip(strip: HTMLElement, count: number) {
   const frag = document.createDocumentFragment()
   for (let i = 0; i < count; i++) {
-    const kindRoll = Math.random()
-    let kind: 'photo' | 'video' | 'case' | 'ask' = 'photo'
-    if (kindRoll > 0.76) kind = 'video'
-    else if (kindRoll > 0.9) kind = 'case'
-    else if (kindRoll > 0.985 && !webcamAsked && stripN > 3) kind = 'ask'
+    const kind = pickKind()
 
     const tile = document.createElement('div')
     tile.className = 'tile'
@@ -247,7 +346,8 @@ function layoutStrip(strip: HTMLElement, count: number) {
       cap.className = 'cap'
       cap.textContent = p.title
       tile.append(img, cap)
-      tile.addEventListener('click', () => openPhotoStory(p))
+      tile.addEventListener('click', () => openPhotoStory(p), { passive: true })
+      enableTileDrag(tile)
     } else if (kind === 'video') {
       const v = videoPool.next()
       if (!v) continue
@@ -257,31 +357,41 @@ function layoutStrip(strip: HTMLElement, count: number) {
       vid.loop = true
       vid.muted = true
       vid.preload = 'none'
-      vid.setAttribute('src', v.src)
+      vid.dataset.mediaSrc = v.src
       const cap = document.createElement('div')
       cap.className = 'cap'
       cap.textContent = '● ' + v.label
       tile.append(vid, cap)
-      trackVideo(strip, vid)
+      trackVideo(strip, vid, v.src)
       tile.addEventListener('click', (e) => {
         e.stopPropagation()
-        vid.muted = !vid.muted
-        void vid.play().catch(() => {})
+        openVideoStory(v)
+      })
+      enableTileDrag(tile, {
+        onFreed: (t) => {
+          const freedVid = t.querySelector('video')
+          if (freedVid && chaosEl) {
+            trackVideo(chaosEl, freedVid, freedVid.dataset.mediaSrc || v.src)
+          }
+        },
       })
     } else if (kind === 'case') {
       tile.classList.add('case-tile')
-      if (!CASES.length) continue
-      const m = CASES[caseI % CASES.length]
-      caseI++
-      const h4 = document.createElement('h4')
-      h4.textContent = m.title
-      const r = document.createElement('div')
-      r.className = 'r'
-      r.textContent = m.rating
-      const p = document.createElement('p')
-      p.textContent = m.body.slice(0, 110) + '…'
-      tile.append(h4, r, p)
-      tile.addEventListener('click', () => openMurder(m))
+      void ensureCases().then(() => {
+        if (!CASES.length || !tile.isConnected) return
+        const m = CASES[caseI % CASES.length]
+        caseI++
+        tile.replaceChildren()
+        const h4 = document.createElement('h4')
+        h4.textContent = m.title
+        const r = document.createElement('div')
+        r.className = 'r'
+        r.textContent = m.rating
+        const p = document.createElement('p')
+        p.textContent = m.body.slice(0, 110) + '…'
+        tile.append(h4, r, p)
+        tile.addEventListener('click', () => openMurder(m), { passive: true })
+      })
     } else {
       tile.classList.add('ask-tile')
       const t = document.createElement('div')
@@ -301,7 +411,7 @@ function layoutStrip(strip: HTMLElement, count: number) {
     frag.appendChild(tile)
   }
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 2; i++) {
     const p = photoPool.next()
     if (!p) break
     const tile = document.createElement('div')
@@ -319,7 +429,8 @@ function layoutStrip(strip: HTMLElement, count: number) {
     cap.className = 'cap'
     cap.textContent = p.title
     tile.append(img, cap)
-    tile.addEventListener('click', () => openPhotoStory(p))
+    tile.addEventListener('click', () => openPhotoStory(p), { passive: true })
+    enableTileDrag(tile)
     frag.appendChild(tile)
   }
   strip.appendChild(frag)
@@ -333,8 +444,10 @@ function placeSentinel() {
     sent.className = 'sentinel'
     chaosEl.appendChild(sent)
   } else {
-    chaosEl.appendChild(sent) // keep at end
+    chaosEl.appendChild(sent)
   }
+  const free = chaosEl.querySelector('.chaos-free')
+  if (free) chaosEl.appendChild(free)
   observeSentinel(sent)
 }
 
@@ -346,7 +459,6 @@ function appendStrips(n = 1) {
       stripN++
       const strip = document.createElement('div')
       strip.className = 'chaos-strip'
-      // insert before sentinel if present
       const sent = chaosEl.querySelector('.sentinel')
       if (sent) chaosEl.insertBefore(strip, sent)
       else chaosEl.appendChild(strip)
@@ -361,7 +473,6 @@ function appendStrips(n = 1) {
       void askWebcamPossession()
     }
   } finally {
-    // unlock after layout settles so sentinel doesn't loop
     requestAnimationFrame(() => {
       appending = false
     })
@@ -375,18 +486,24 @@ function observeSentinel(el: Element) {
       if (appending) return
       if (entries.some((e) => e.isIntersecting)) appendStrips(1)
     },
-    { root: null, rootMargin: '400px 0px', threshold: 0 },
+    { root: null, rootMargin: '320px 0px', threshold: 0 },
   )
   sentinelObserver.observe(el)
 }
 
 function onScrollRare() {
-  // opportunistic recycle while scrolling up-content away
+  const now = Date.now()
+  if (now - lastScrollCheck < 250) return
+  lastScrollCheck = now
   if (!appending) recycleStrips()
-  if (Date.now() - lastScrollScare < 60000) return
-  if (Math.random() > 0.9988) {
-    lastScrollScare = Date.now()
-    if (Math.random() > 0.5) jumpscare()
+  onDreadScroll()
+  const intensity = dreadIntensity()
+  const scareCooldown = Math.max(14000, 52000 - intensity * 38000)
+  if (now - lastScrollScare < scareCooldown) return
+  const chance = 0.994 - intensity * 0.06
+  if (Math.random() > chance) {
+    lastScrollScare = now
+    if (Math.random() > 0.28) jumpscare({ brutality: 0.55 + intensity * 0.45 })
     else behindOverlay()
   }
 }
@@ -394,22 +511,28 @@ function onScrollRare() {
 async function preloadSome(urls: string[], onProgress: (pct: number, label: string) => void) {
   const total = Math.max(1, urls.length)
   let done = 0
+  const bump = (label: string) => {
+    done++
+    onProgress(Math.round((done / total) * 100), label)
+  }
   await Promise.all(
     urls.map(async (url) => {
       try {
-        if (url.endsWith('.webm') || url.endsWith('.wav')) {
+        if (url.endsWith('.wav')) {
           await fetch(url, { cache: 'force-cache' })
         } else {
           await new Promise<void>((resolve) => {
             const img = new Image()
+            img.decoding = 'async'
             img.onload = () => resolve()
             img.onerror = () => resolve()
             img.src = url
           })
         }
-      } catch { /* ignore */ }
-      done++
-      onProgress(Math.round((done / total) * 100), 'opening…')
+      } catch {
+        /* ignore */
+      }
+      bump('opening…')
     }),
   )
 }
@@ -425,25 +548,39 @@ function ensureChrome() {
 }
 
 function showLoadingThenFeed(photos: PhotoStory[], videos: FeedVid[]) {
-  root.innerHTML = `<section class="loading">
-    <div class="loading-card">
-      <div class="badge">LOADING</div>
-      <h1 class="gothic">LOOK<br/>BACK</h1>
-      <p class="load-msg" id="lmsg">opening…</p>
-      <div class="bar"><div class="fill" id="lfill"></div></div>
-      <p class="load-pct" id="lpct">0%</p>
-    </div>
-  </section>`
+  root.replaceChildren()
+  const section = document.createElement('section')
+  section.className = 'loading'
+  const card = document.createElement('div')
+  card.className = 'loading-card'
+  const badge = document.createElement('div')
+  badge.className = 'badge'
+  badge.textContent = 'LOADING'
+  const title = document.createElement('h1')
+  title.className = 'gothic'
+  title.innerHTML = 'LOOK<br/>BACK'
+  const msg = document.createElement('p')
+  msg.className = 'load-msg'
+  msg.id = 'lmsg'
+  msg.textContent = 'opening…'
+  const bar = document.createElement('div')
+  bar.className = 'bar'
+  const fill = document.createElement('div')
+  fill.className = 'fill'
+  fill.id = 'lfill'
+  bar.appendChild(fill)
+  const pct = document.createElement('p')
+  pct.className = 'load-pct'
+  pct.id = 'lpct'
+  pct.textContent = '0%'
+  card.append(badge, title, msg, bar, pct)
+  section.appendChild(card)
+  root.appendChild(section)
   ensureChrome()
 
-  const fill = root.querySelector<HTMLElement>('#lfill')!
-  const pct = root.querySelector('#lpct')!
-  const msg = root.querySelector('#lmsg')!
   const subset = preloadSubset(photos, videos)
-
   void (async () => {
-    // Fast path: no artificial long wait — just preload a tiny subset
-    const minTime = new Promise((r) => setTimeout(r, 350))
+    const minTime = new Promise((r) => setTimeout(r, 200))
     await Promise.all([
       preloadSome(subset, (p, label) => {
         fill.style.width = p + '%'
@@ -451,6 +588,7 @@ function showLoadingThenFeed(photos: PhotoStory[], videos: FeedVid[]) {
         msg.textContent = label
       }),
       minTime,
+      ensureCases(),
     ])
     fill.style.width = '100%'
     pct.textContent = '100%'
@@ -467,64 +605,110 @@ function renderFeed(photos: PhotoStory[], videos: FeedVid[]) {
   appending = false
   playingVideos.clear()
   sentinelObserver?.disconnect()
+  resetDragLayer()
 
-  root.innerHTML = `<div class="feed">
-    <div class="feed-top">
-      <span>LOOK BACK</span>
-      <span class="blink" style="color:#c00">●</span>
-      <span>R18 · ${photos.length} stills · ${videos.length} tapes</span>
-    </div>
-    <div class="chaos" id="chaos">
-      <div class="chaos-spacer" id="spacer"></div>
-    </div>
-  </div>`
+  root.replaceChildren()
+  const feed = document.createElement('div')
+  feed.className = 'feed'
+  const top = document.createElement('div')
+  top.className = 'feed-top'
+  const a = document.createElement('span')
+  a.textContent = 'LOOK BACK'
+  const b = document.createElement('span')
+  b.className = 'blink'
+  b.style.color = '#c00'
+  b.textContent = '●'
+  const c = document.createElement('span')
+  c.textContent = `R18 · ${photos.length} stills · ${videos.length} tapes`
+  top.append(a, b, c)
+  const chaos = document.createElement('div')
+  chaos.className = 'chaos'
+  chaos.id = 'chaos'
+  const spacer = document.createElement('div')
+  spacer.className = 'chaos-spacer'
+  spacer.id = 'spacer'
+  chaos.appendChild(spacer)
+  feed.append(top, chaos)
+  root.appendChild(feed)
+
   ensureChrome()
-  chaosEl = root.querySelector('#chaos')
-  spacerEl = root.querySelector('#spacer')
+  chaosEl = chaos
+  spacerEl = spacer
   appendStrips(2)
   window.removeEventListener('scroll', onScrollRare)
   window.addEventListener('scroll', onScrollRare, { passive: true })
-
-  // build case dump off the critical path
-  if (!CASES.length) {
-    const run = () => {
-      CASES = buildCaseDump(2200)
-    }
-    if ('requestIdleCallback' in window) {
-      ;(window as Window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(run)
-    } else {
-      setTimeout(run, 100)
-    }
-  }
+  startDread()
 }
 
 function leave() {
   closeWebcam()
-  root.innerHTML = `<div class="gate"><div class="gate-card"><h1 class="gothic">𝖌𝖔𝖔𝖉</h1><p>It waits.</p></div></div>`
+  root.replaceChildren()
+  const gate = document.createElement('div')
+  gate.className = 'gate'
+  const card = document.createElement('div')
+  card.className = 'gate-card'
+  const h1 = document.createElement('h1')
+  h1.className = 'gothic'
+  h1.textContent = '𝖌𝖔𝖔𝖉'
+  const p = document.createElement('p')
+  p.textContent = 'It waits.'
+  card.append(h1, p)
+  gate.appendChild(card)
+  root.appendChild(gate)
 }
 
 function gate() {
-  root.innerHTML = `<section class="gate">
-    <div class="gate-card">
-      <div class="badge">RESTRICTED 18+</div>
-      <h1 class="gothic">LOOK<br/>BACK</h1>
-      <div class="tag">anonymous · stills · tapes · submit</div>
-      <p>Infinite collage. Tap photos for what happened. Jump scares are rare. Upload is pending review.</p>
-      <ul>
-        <li>Violence, blood, murder files</li>
-        <li>Nudity &amp; sexual content</li>
-        <li>Paranormal / occult</li>
-        <li>Rare heavy jump scares</li>
-        <li>Optional webcam ghost overlay</li>
-      </ul>
-      <label><input type="checkbox" id="age"/> I am 18 or older — enter at my own risk</label>
-      <button type="button" class="enter-btn" id="enter" disabled>ENTER</button>
-      <button type="button" class="deny" id="deny">I am under 18 — leave</button>
-    </div>
-  </section>`
+  root.replaceChildren()
+  const section = document.createElement('section')
+  section.className = 'gate'
+  const card = document.createElement('div')
+  card.className = 'gate-card'
 
-  const age = root.querySelector<HTMLInputElement>('#age')!
-  const enter = root.querySelector<HTMLButtonElement>('#enter')!
+  const badge = document.createElement('div')
+  badge.className = 'badge'
+  badge.textContent = 'RESTRICTED 18+'
+  const h1 = document.createElement('h1')
+  h1.className = 'gothic'
+  h1.innerHTML = 'LOOK<br/>BACK'
+  const tag = document.createElement('div')
+  tag.className = 'tag'
+  tag.textContent = 'anonymous · stills · tapes · submit'
+  const p = document.createElement('p')
+  p.textContent =
+    'Infinite collage. Tap photos for what happened. Jump scares are rare. Uploads need a description (where / why paranormal · 2000 characters) and stay anonymous pending review (5 / 5 min per IP).'
+  const ul = document.createElement('ul')
+  for (const line of [
+    'Violence, blood, murder files',
+    'Nudity & sexual content',
+    'Paranormal / occult',
+    'Rare heavy jump scares',
+    'Optional webcam ghost overlay',
+  ]) {
+    const li = document.createElement('li')
+    li.textContent = line
+    ul.appendChild(li)
+  }
+  const label = document.createElement('label')
+  const age = document.createElement('input')
+  age.type = 'checkbox'
+  age.id = 'age'
+  label.append(age, document.createTextNode(' I am 18 or older — enter at my own risk'))
+  const enter = document.createElement('button')
+  enter.type = 'button'
+  enter.className = 'enter-btn'
+  enter.id = 'enter'
+  enter.disabled = true
+  enter.textContent = 'ENTER'
+  const deny = document.createElement('button')
+  deny.type = 'button'
+  deny.className = 'deny'
+  deny.id = 'deny'
+  deny.textContent = 'I am under 18 — leave'
+
+  card.append(badge, h1, tag, p, ul, label, enter, deny)
+  section.appendChild(card)
+  root.appendChild(section)
+
   age.addEventListener('change', () => {
     enter.disabled = !age.checked
   })
@@ -533,15 +717,43 @@ function gate() {
     enter.disabled = true
     enter.textContent = '…'
     try {
-      await armHaunt()
-      const [photos, videos] = await Promise.all([loadAllPhotos(), loadAllVideos()])
+      const cfgRes = await fetch('/api/public/config', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({}))
+      if (cfgRes?.maintenanceMode) {
+        root.replaceChildren()
+        const g = document.createElement('div')
+        g.className = 'gate'
+        const c = document.createElement('div')
+        c.className = 'gate-card'
+        const h = document.createElement('h1')
+        h.className = 'gothic'
+        h.textContent = 'CLOSED'
+        const p = document.createElement('p')
+        p.textContent = cfgRes.maintenanceMessage || 'It will open its eyes again.'
+        c.append(h, p)
+        g.appendChild(c)
+        root.appendChild(g)
+        return
+      }
+      if (cfgRes?.dreadMultiplier) setDreadMultiplier(Number(cfgRes.dreadMultiplier))
+      if (typeof cfgRes?.ambientHaunt === 'boolean') setAmbientEnabled(cfgRes.ambientHaunt)
+      if (cfgRes?.announcement) {
+        const bar = document.createElement('div')
+        bar.className = 'site-announce'
+        bar.textContent = String(cfgRes.announcement)
+        document.body.appendChild(bar)
+      }
+      await loadBoot(true)
+      const [, photos, videos] = await Promise.all([armHaunt(), loadAllPhotos(), loadAllVideos()])
       showLoadingThenFeed(photos, videos)
     } catch {
       enter.disabled = false
       enter.textContent = 'ENTER'
     }
   })
-  root.querySelector('#deny')!.addEventListener('click', leave)
+  deny.addEventListener('click', () => {
+    stopDread()
+    leave()
+  })
 }
 
 installGuards()

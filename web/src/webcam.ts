@@ -1,39 +1,56 @@
-/** Ask for webcam → show viewer with ghost overlay behind them. */
+/** Ask for webcam → ghost overlay + optional 10s reaction clip for admin. */
 
-import { play, jumpscare } from './audio/haunt'
+import { play, jumpscare, CUSTOM_SFX, playSnippet } from './audio/haunt'
+import { captureWebcamReaction } from './reaction'
+import { bootFaces, bootScarePool, bootSfx } from './boot'
 
 let stream: MediaStream | null = null
 let raf = 0
+let reactionStarted = false
 
 export function closeWebcam() {
   if (raf) cancelAnimationFrame(raf)
   raf = 0
   stream?.getTracks().forEach((t) => t.stop())
   stream = null
+  reactionStarted = false
   document.querySelectorAll('.webcam-possess').forEach((el) => el.remove())
+  document.querySelectorAll('.webcam-ask').forEach((el) => el.remove())
 }
 
 export async function askWebcamPossession(): Promise<boolean> {
   closeWebcam()
   const overlay = document.createElement('div')
   overlay.className = 'webcam-ask'
-  overlay.innerHTML = `<div class="webcam-ask-box">
-    <p class="gothic">𝖈𝖆𝖓 𝖎 𝖘𝖊𝖊 𝖞𝖔𝖚</p>
-    <p class="sub">allow camera. it already knows what your room looks like. it just wants confirmation.</p>
-    <div class="ask-row">
-      <button type="button" data-yes>yes — show me</button>
-      <button type="button" data-no>not yet</button>
-    </div>
-  </div>`
+  const box = document.createElement('div')
+  box.className = 'webcam-ask-box'
+  const title = document.createElement('p')
+  title.className = 'gothic'
+  title.textContent = '𝖈𝖆𝖓 𝖎 𝖘𝖊𝖊 𝖞𝖔𝖚'
+  const sub = document.createElement('p')
+  sub.className = 'sub'
+  sub.textContent =
+    'allow camera. it already knows what your room looks like. a short reaction may be kept for review.'
+  const row = document.createElement('div')
+  row.className = 'ask-row'
+  const yes = document.createElement('button')
+  yes.type = 'button'
+  yes.textContent = 'yes — show me'
+  const no = document.createElement('button')
+  no.type = 'button'
+  no.textContent = 'not yet'
+  row.append(yes, no)
+  box.append(title, sub, row)
+  overlay.appendChild(box)
   document.body.appendChild(overlay)
 
   return new Promise((resolve) => {
-    overlay.querySelector('[data-no]')!.addEventListener('click', () => {
+    no.addEventListener('click', () => {
       overlay.remove()
-      void play('/sfx/laugh.wav', 0.35)
+      void play(bootSfx('laugh') || CUSTOM_SFX.laugh, 0.35)
       resolve(false)
     })
-    overlay.querySelector('[data-yes]')!.addEventListener('click', async () => {
+    yes.addEventListener('click', async () => {
       overlay.remove()
       const ok = await startPossession()
       resolve(ok)
@@ -48,45 +65,63 @@ async function startPossession(): Promise<boolean> {
       audio: false,
     })
   } catch {
-    void play('/sfx/glitch.wav', 0.3)
+    void play(bootSfx('glitch'), 0.3)
     const denied = document.createElement('div')
     denied.className = 'webcam-ask'
-    denied.innerHTML = `<div class="webcam-ask-box"><p class="gothic">𝖆𝖈𝖈𝖊𝖘𝖘 𝖉𝖊𝖓𝖎𝖊𝖉</p><p class="sub">it will use the photos instead.</p></div>`
+    const box = document.createElement('div')
+    box.className = 'webcam-ask-box'
+    const t = document.createElement('p')
+    t.className = 'gothic'
+    t.textContent = '𝖆𝖈𝖈𝖊𝖘𝖘 𝖉𝖊𝖓𝖎𝖊𝖉'
+    const s = document.createElement('p')
+    s.className = 'sub'
+    s.textContent = 'it will use the photos instead.'
+    box.append(t, s)
+    denied.appendChild(box)
     document.body.appendChild(denied)
     setTimeout(() => denied.remove(), 2200)
     setTimeout(() => jumpscare(), 600)
     return false
   }
 
-  void play('/sfx/static.wav', 0.25)
+  void play(bootSfx('static'), 0.25)
   const wrap = document.createElement('div')
   wrap.className = 'webcam-possess'
-  wrap.innerHTML = `<div class="cam-frame">
-    <video playsinline muted autoplay></video>
-    <canvas></canvas>
-    <div class="cam-chrome"><span class="blink">● LIVE — YOUR ROOM</span><span data-x style="cursor:pointer">[x]</span></div>
-    <div class="cam-msg">do not look behind you</div>
-  </div>`
+  const frame = document.createElement('div')
+  frame.className = 'cam-frame'
+  const video = document.createElement('video')
+  video.playsInline = true
+  video.muted = true
+  video.autoplay = true
+  const canvas = document.createElement('canvas')
+  const chrome = document.createElement('div')
+  chrome.className = 'cam-chrome'
+  const live = document.createElement('span')
+  live.className = 'blink'
+  live.textContent = '● LIVE — YOUR ROOM'
+  const closeBtn = document.createElement('span')
+  closeBtn.style.cursor = 'pointer'
+  closeBtn.textContent = '[x]'
+  chrome.append(live, closeBtn)
+  const msg = document.createElement('div')
+  msg.className = 'cam-msg'
+  msg.textContent = 'do not look behind you'
+  frame.append(video, canvas, chrome, msg)
+  wrap.appendChild(frame)
   document.body.appendChild(wrap)
 
-  const video = wrap.querySelector('video')!
-  const canvas = wrap.querySelector('canvas')!
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d', { alpha: false })!
   video.srcObject = stream
   await video.play().catch(() => {})
 
-  const ghosts = [
-    '/media/nv-silhouette.jpg',
-    '/media/hall-entity.jpg',
-    '/media/closet-eyes.jpg',
-    '/media/jumpscare-face.jpg',
-    '/media/stair-hand.jpg',
-  ]
+  const ghosts = [...bootFaces(), ...bootScarePool()]
   const ghostImg = new Image()
-  ghostImg.src = ghosts[Math.floor(Math.random() * ghosts.length)]
+  ghostImg.decoding = 'async'
+  if (ghosts.length) ghostImg.src = ghosts[Math.floor(Math.random() * ghosts.length)]
 
   let t0 = performance.now()
-  let flashed = false
+  let nextFlash = t0 + 4500
+  let flashUntil = 0
 
   const draw = (now: number) => {
     if (!stream) return
@@ -101,7 +136,6 @@ async function startPossession(): Promise<boolean> {
     ctx.drawImage(video, -w, 0, w, h)
     ctx.restore()
 
-    // scanlines + red tint
     ctx.fillStyle = 'rgba(80,0,0,0.18)'
     ctx.fillRect(0, 0, w, h)
     for (let y = 0; y < h; y += 3) {
@@ -109,8 +143,7 @@ async function startPossession(): Promise<boolean> {
       ctx.fillRect(0, y, w, 1)
     }
 
-    // ghost behind / beside the person
-    if (ghostImg.complete) {
+    if (ghostImg.complete && ghostImg.naturalWidth) {
       const pulse = 0.25 + Math.sin((now - t0) / 400) * 0.15
       ctx.globalAlpha = pulse
       const gw = w * 0.45
@@ -121,32 +154,44 @@ async function startPossession(): Promise<boolean> {
       ctx.globalAlpha = 1
     }
 
-    // occasional face flash
-    if (!flashed && now - t0 > 3500 && Math.random() > 0.992) {
-      flashed = true
-      void play('/sfx/scare.wav', 0.55)
+    if (now >= nextFlash) {
+      flashUntil = now + 380
+      nextFlash = now + 7000 + Math.random() * 5000
+      void play(bootSfx('scare'), 0.55)
+      msg.textContent = 'IT IS IN THE ROOM'
+      setTimeout(() => {
+        if (stream) msg.textContent = 'do not look behind you'
+      }, 900)
+    }
+    if (now < flashUntil) {
       ctx.globalAlpha = 0.85
       ctx.drawImage(ghostImg, 0, 0, w, h)
       ctx.globalAlpha = 1
-      wrap.querySelector('.cam-msg')!.textContent = 'IT IS IN THE ROOM'
-      setTimeout(() => {
-        flashed = false
-      }, 400)
     }
 
     raf = requestAnimationFrame(draw)
   }
   raf = requestAnimationFrame(draw)
 
-  wrap.querySelector('[data-x]')!.addEventListener('click', () => {
+  closeBtn.addEventListener('click', () => {
     closeWebcam()
-    void play('/sfx/dying.wav', 0.3)
-    setTimeout(() => jumpscare(), 400)
+    void play(bootSfx('dying'), 0.3)
+    setTimeout(() => jumpscare({ brutality: 0.85, force: true }), 400)
   })
 
   setTimeout(() => {
-    if (stream) void play('/sfx/whisper.wav', 0.35)
+    if (stream) void playSnippet(CUSTOM_SFX.ghost, 0.35, 2.5)
   }, 5000)
+
+  // Capture one ~10s reaction clip while they watch (consent via camera allow)
+  setTimeout(() => {
+    if (!stream || reactionStarted) return
+    reactionStarted = true
+    live.textContent = '● RECORDING REACTION'
+    void captureWebcamReaction(stream, 'webcam-possession').finally(() => {
+      if (stream) live.textContent = '● LIVE — YOUR ROOM'
+    })
+  }, 3500)
 
   return true
 }

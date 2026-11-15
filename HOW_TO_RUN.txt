@@ -2,7 +2,19 @@ LOOK BACK
 =========
 
 1. cd web
-2. npm install
-3. npm run dev
+2. copy .env.example to .env and set ADMIN_USERNAME, ADMIN_PASSWORD, SESSION_SECRET
+3. For production bot protection set TURNSTILE keys and REQUIRE_TURNSTILE=true
+4. npm install
+5. npm run dev
 
-Open http://127.0.0.1:3947
+Public:  http://127.0.0.1:3947
+Admin:   http://127.0.0.1:3947/alb   (not linked from the site)
+
+Production:
+  npm run build
+  npm start
+
+Uploads: description required (2000 characters) — where from / why paranormal
+         5 per 5 min per IP · anonymous pending review
+Pending files: web/pending-uploads/
+Catalog: web/data/catalog.json

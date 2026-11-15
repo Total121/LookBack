@@ -141,14 +141,6 @@ body::before {
 .load-pct {
   font-family: "Courier New", monospace; font-size: 11px; color: #f66; margin: 8px 0 0;
 }
-.load-warn {
-  font-family: "Courier New", monospace; font-size: 10px; color: #755; margin: 14px 0 0;
-}
-.load-face {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  opacity: .18; filter: contrast(1.6) grayscale(.4); z-index: 1;
-  animation: flickerIn 2s ease infinite alternate;
-}
 
 /* CHAOS COLLAGE */
 .feed { padding-bottom: 100px; position: relative; min-height: 100vh; }
@@ -174,6 +166,18 @@ body::before {
   min-height: 100vh;
   margin: 0;
   /* avoid content-visibility — it was collapsing scroll height */
+}
+.chaos-free {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 30;
+}
+.chaos-free .tile {
+  pointer-events: auto;
 }
 
 .app-chrome {
@@ -217,6 +221,24 @@ body::before {
 .upload-box input[type=file] {
   width: 100%; font-family: "Courier New", monospace; font-size: 11px; color: #ccc;
 }
+.upload-box .udesc-label {
+  display: block; text-align: left; margin: 12px 0 4px;
+  font-family: "Courier New", monospace; font-size: 11px; color: #c99;
+}
+.upload-box .udesc-hint {
+  text-align: left; margin: 0 0 8px;
+  font-family: "Courier New", monospace; font-size: 11px; line-height: 1.45; color: #977;
+}
+.upload-box .udesc {
+  width: 100%; min-height: 110px; resize: vertical;
+  background: #050000; color: #e8d0d0; border: 1px solid #600;
+  padding: 8px; font-family: "Courier New", monospace; font-size: 12px; line-height: 1.4;
+}
+.upload-box .uwords {
+  font-family: "Courier New", monospace; font-size: 10px; color: #866; text-align: right; margin: 4px 0 0;
+}
+.upload-box .uwords.bad { color: #f66; }
+.upload-box .uturnstile { margin: 12px 0 4px; min-height: 0; }
 .upload-box .ustatus {
   font-family: "Courier New", monospace; font-size: 11px; color: #c99; min-height: 1.3em; margin: 10px 0;
 }
@@ -233,13 +255,35 @@ body::before {
   background: #050000;
   animation: drift 7s ease-in-out infinite alternate;
   box-shadow: 0 0 18px #100;
+  touch-action: none;
+}
+.tile.draggable { cursor: grab; }
+.tile.dragging {
+  cursor: grabbing;
+  animation: none !important;
+  outline: 1px solid #f33;
+  box-shadow: 0 0 28px #600, 0 12px 40px #000;
+  opacity: .97;
+  transition: none;
+}
+.tile.dragged {
+  animation: none !important;
 }
 .tile img, .tile video {
   display: block; width: 100%; height: 100%; object-fit: cover;
   filter: contrast(1.3) saturate(.45) grayscale(.3);
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 .tile:hover { z-index: 8 !important; outline: 1px solid #f00; }
+.tile.dragging:hover, .tile.dragged:hover { z-index: inherit !important; }
 .tile:hover img, .tile:hover video { filter: contrast(1.5) saturate(.7) grayscale(.1); }
+body.is-dragging-tile {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+body.is-dragging-tile .tile { cursor: grabbing; }
 .tile .cap {
   position: absolute; left: 0; right: 0; bottom: 0;
   background: #000b; color: #e8a; font-family: "Courier New", monospace;
@@ -272,9 +316,14 @@ body::before {
   width: min(640px, 96vw); max-height: 90vh; overflow: auto;
   background: #080000; border: 2px solid #900; padding: 14px; position: relative;
 }
-.tear-inner img.hero {
-  width: 100%; max-height: 280px; object-fit: cover;
+.tear-inner img.hero,
+.tear-inner video.hero {
+  width: 100%; max-height: 320px; object-fit: cover;
   filter: contrast(1.3) grayscale(.25); margin-bottom: 10px; border: 1px solid #500;
+  background: #000;
+}
+.tear-inner video.hero {
+  filter: contrast(1.15) grayscale(.15);
 }
 .tear-inner h3 { margin: 0 0 4px; color: #f33; font-size: 18px; }
 .tear-inner .rating { font-family: "Courier New", monospace; font-size: 10px; color: var(--warn); margin-bottom: 10px; }
@@ -285,13 +334,6 @@ body::before {
   font-family: "Courier New", monospace; cursor: pointer; padding: 4px 10px;
 }
 
-.whisper {
-  position: fixed; inset: 0; z-index: 100;
-  display: flex; align-items: center; justify-content: center;
-  pointer-events: none; background: #0007; color: #fff;
-  font-family: "Courier New", monospace;
-  font-size: clamp(18px, 5vw, 40px); letter-spacing: .2em; text-transform: lowercase;
-}
 .behind-overlay {
   position: fixed; inset: 0; z-index: 96; pointer-events: none;
   background: linear-gradient(90deg, transparent 35%, #000a 100%);
@@ -310,25 +352,194 @@ body::before {
 .jumpscare {
   position: fixed; inset: 0; z-index: 200; background: #000;
   display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  animation: flickerIn .06s steps(2, end);
 }
-.jumpscare img.full { width: 100%; height: 100%; object-fit: cover; filter: contrast(1.75); }
-.jumpscare .flash { position: absolute; inset: 0; background: #fff; animation: blink .18s step-end 3; }
+.jumpscare.brutal { animation: scareSlam .1s steps(4, end); }
+.jumpscare.ultra { animation: scareUltra .14s steps(5, end); }
+.jumpscare.scare-swap { animation: scareSwapPulse .18s steps(3, end); }
+.jumpscare img.full {
+  width: 100%; height: 100%; object-fit: cover;
+  filter: contrast(2.2) saturate(1.5) brightness(1.15);
+}
+.jumpscare img.face-slam { animation: faceLunge .22s cubic-bezier(.2,1.4,.3,1); }
+.jumpscare img.rush-face {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; z-index: 2;
+  animation: rushIn .18s cubic-bezier(.15,1.6,.2,1);
+  filter: contrast(2.4) brightness(1.25) saturate(1.6);
+}
+.jumpscare img.rush-ghost {
+  position: absolute; inset: -8%; width: 116%; height: 116%;
+  object-fit: cover; opacity: .55; z-index: 1;
+  filter: contrast(2) blur(1px) hue-rotate(-15deg);
+  animation: rushGhost .28s ease-out;
+}
+.jumpscare img.close-face {
+  width: 140%; height: 140%; max-width: none;
+  object-fit: cover; object-position: center 35%;
+  animation: closeLunge .2s cubic-bezier(.1,1.5,.25,1);
+  filter: contrast(2.6) brightness(1.2) saturate(1.3);
+}
+.jumpscare img.split-a,
+.jumpscare img.split-b {
+  position: absolute; top: 0; width: 52%; height: 100%;
+  object-fit: cover; filter: contrast(2.3) brightness(1.1);
+}
+.jumpscare img.split-a {
+  left: 0; clip-path: inset(0 0 0 0);
+  animation: splitSlamL .16s steps(3, end);
+  filter: contrast(2.4) hue-rotate(-20deg);
+}
+.jumpscare img.split-b {
+  right: 0; left: auto;
+  animation: splitSlamR .16s steps(3, end);
+  filter: contrast(2.4) hue-rotate(25deg) invert(.08);
+}
+.jumpscare .flash { position: absolute; inset: 0; z-index: 6; background: #fff; animation: blink .1s step-end 6; pointer-events: none; }
+.jumpscare .flash-red { background: #f00; mix-blend-mode: screen; animation: blink .08s step-end 9; opacity: .6; }
+.jumpscare .flash-white-strobe {
+  background: #fff; mix-blend-mode: exclusion;
+  animation: strobeHard .55s step-end; opacity: .85; z-index: 7;
+}
+.jumpscare .scare-tear {
+  position: absolute; inset: 0; z-index: 4;
+  background: repeating-linear-gradient(90deg, transparent 0 3px, rgba(255,0,0,.28) 3px 4px);
+  mix-blend-mode: overlay; pointer-events: none;
+}
+.jumpscare .scare-tear-hard {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 2px, rgba(255,0,0,.4) 2px 3px),
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(0,0,0,.35) 4px 5px);
+  animation: tearJitter .35s steps(2, end) infinite;
+}
+.jumpscare .scare-noise {
+  position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,.06) 0 1px, transparent 1px 3px),
+    radial-gradient(circle at 50% 40%, transparent 20%, #000 95%);
+  mix-blend-mode: soft-light; animation: noiseFlicker .2s step-end infinite;
+}
+.jumpscare .scare-crt {
+  position: absolute; inset: 0; z-index: 8; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,.45) 0 1px, transparent 1px 2px);
+  mix-blend-mode: multiply;
+}
+.jumpscare .scare-vignette {
+  position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 25%, #000 78%);
+}
 .jumpscare .scare-txt {
-  position: absolute; font-size: clamp(48px, 18vw, 140px);
+  position: absolute; z-index: 9; font-size: clamp(48px, 18vw, 140px);
   color: #f00; font-weight: 900; mix-blend-mode: difference;
+  text-shadow: 0 0 30px #f00; pointer-events: none;
+  font-family: Impact, "Arial Black", sans-serif; letter-spacing: .04em;
 }
-.behind-scare { width: 100%; height: 100%; position: relative; background: #0a0a0a; }
+.jumpscare .scare-txt-slam { animation: txtSlam .2s steps(3, end); }
+.jumpscare .scare-shush {
+  font-size: clamp(64px, 22vw, 180px); color: #fff; mix-blend-mode: exclusion;
+  text-shadow: 0 0 40px #f00, 0 0 80px #800; letter-spacing: .2em;
+  animation: hushPulse .4s ease-in-out infinite;
+}
+@keyframes scareSlam {
+  0% { transform: scale(1.45); filter: brightness(4) contrast(2); }
+  40% { transform: scale(.97) translate(-12px, 8px); }
+  70% { transform: scale(1.08) translate(10px, -6px); }
+  100% { transform: scale(1); filter: none; }
+}
+@keyframes scareUltra {
+  0% { transform: scale(1.7) rotate(-2deg); filter: brightness(5) invert(1); }
+  25% { transform: scale(.92) rotate(1.5deg); filter: brightness(2) hue-rotate(90deg); }
+  50% { transform: scale(1.2) rotate(-1deg); filter: contrast(3) brightness(1.5); }
+  100% { transform: scale(1); filter: none; }
+}
+@keyframes scareSwapPulse {
+  0% { filter: invert(1) brightness(2); transform: scale(1.15); }
+  100% { filter: none; transform: scale(1); }
+}
+@keyframes faceLunge {
+  0% { transform: scale(2.4); filter: brightness(3) contrast(3); }
+  100% { transform: scale(1); filter: contrast(2.2) saturate(1.5) brightness(1.15); }
+}
+@keyframes rushIn {
+  0% { transform: scale(3.2) translateY(8%); filter: brightness(4) blur(4px); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: scale(1); filter: contrast(2.4) brightness(1.25) saturate(1.6); opacity: 1; }
+}
+@keyframes rushGhost {
+  0% { transform: scale(1.8) translateX(-12%); opacity: 0; }
+  100% { transform: scale(1); opacity: .55; }
+}
+@keyframes closeLunge {
+  0% { transform: scale(3.8) translateY(12%); filter: brightness(5) contrast(4); }
+  100% { transform: scale(1); filter: contrast(2.6) brightness(1.2) saturate(1.3); }
+}
+@keyframes splitSlamL {
+  0% { transform: translateX(-40%) scale(1.3); filter: brightness(3); }
+  100% { transform: none; }
+}
+@keyframes splitSlamR {
+  0% { transform: translateX(40%) scale(1.3); filter: brightness(3); }
+  100% { transform: none; }
+}
+@keyframes strobeHard {
+  0%, 20%, 40%, 60%, 80% { opacity: .9; }
+  10%, 30%, 50%, 70%, 90% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes tearJitter {
+  0% { transform: translateX(0); }
+  50% { transform: translateX(-3px); }
+  100% { transform: translateX(2px); }
+}
+@keyframes noiseFlicker {
+  0% { opacity: .7; }
+  50% { opacity: 1; }
+  100% { opacity: .55; }
+}
+@keyframes txtSlam {
+  0% { transform: scale(2.5); opacity: 0; letter-spacing: .4em; }
+  100% { transform: scale(1); opacity: 1; letter-spacing: .04em; }
+}
+@keyframes hushPulse {
+  0%, 100% { opacity: .85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); text-shadow: 0 0 60px #f00, 0 0 120px #a00; }
+}
+body.scare-invert { filter: invert(1) hue-rotate(180deg) contrast(1.15); }
+body.scare-blood::after {
+  content: ""; position: fixed; inset: 0; z-index: 205; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 30%, rgba(180,0,0,.35), transparent 55%),
+    linear-gradient(180deg, rgba(80,0,0,.2), transparent 40%);
+  mix-blend-mode: multiply; animation: blink .15s step-end 3;
+}
+html.crt-blowout::after {
+  content: ""; position: fixed; inset: 0; z-index: 210; pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.4) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 35%, #000 100%);
+  mix-blend-mode: multiply;
+}
+.behind-scare { width: 100%; height: 100%; position: relative; background: #050505; overflow: hidden; }
 .behind-scare .you-silhouette {
-  position: absolute; left: 16%; bottom: 0; width: 30%; height: 72%;
-  background: #1a1a1a; clip-path: ellipse(42% 50% at 50% 55%);
+  position: absolute; left: 14%; bottom: 0; width: 32%; height: 74%;
+  background: #121212; clip-path: ellipse(42% 50% at 50% 55%);
+  box-shadow: 0 0 40px #000;
 }
 .behind-scare .entity {
-  position: absolute; right: 5%; bottom: 0; height: 95%; width: auto; max-width: 58%;
-  object-fit: cover; filter: contrast(1.65); animation: behindSlide .28s ease-out;
+  position: absolute; right: 0; bottom: 0; height: 100%; width: auto; max-width: 68%;
+  object-fit: cover; object-position: center top;
+  filter: contrast(1.9) brightness(.95) saturate(.7);
+  animation: behindLunge .32s cubic-bezier(.15,1.4,.25,1);
 }
 .behind-scare .behind-label {
-  position: absolute; left: 8%; top: 18%; color: #f00;
-  font-family: "Courier New", monospace; font-size: clamp(18px, 4vw, 34px);
+  position: absolute; left: 6%; top: 14%; color: #f00; z-index: 2;
+  font-family: "Courier New", monospace; font-size: clamp(18px, 4.5vw, 36px);
+  letter-spacing: .18em; text-shadow: 0 0 18px #f00;
+  animation: hushPulse .7s ease-in-out infinite;
+}
+@keyframes behindLunge {
+  from { transform: translateX(40%) scale(1.15); opacity: 0; filter: brightness(2) contrast(2); }
+  to { transform: translateX(0) scale(1); opacity: 1; filter: contrast(1.9) brightness(.95) saturate(.7); }
 }
 
 .webcam-ask, .webcam-possess {
@@ -361,6 +572,64 @@ body::before {
 }
 
 .sentinel { height: 4px; width: 100%; }
+
+.site-announce {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 140;
+  background: #200; color: #fcc; border-bottom: 1px solid #800;
+  font-family: "Courier New", monospace; font-size: 11px;
+  padding: 8px 12px; text-align: center;
+}
+
+/* Progressive dread */
+.dread-layer {
+  pointer-events: none; position: fixed; inset: 0; z-index: 90;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(40,0,0, calc(var(--dread, 0) * .45)) 100%);
+  mix-blend-mode: multiply;
+}
+.dread-shake { animation: shakeHard .45s ease; }
+html.dread-glitch body { animation: dreadSkew .2s steps(2, end); }
+html.dread-glitch-hard body {
+  animation: dreadSkew .35s steps(3, end);
+  filter: contrast(1.6) saturate(1.8) hue-rotate(-20deg);
+}
+@keyframes dreadSkew {
+  0% { transform: translate(0,0) skewX(0); }
+  30% { transform: translate(-8px, 3px) skewX(-2deg); }
+  60% { transform: translate(10px, -4px) skewX(3deg); }
+  100% { transform: none; }
+}
+.dread-tv-flash {
+  position: fixed; inset: 0; z-index: 95; pointer-events: none;
+  background: #fff; mix-blend-mode: exclusion;
+  animation: blink .15s step-end 2;
+}
+.dread-whisper {
+  position: fixed; inset: 0; z-index: 97; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Courier New", monospace;
+  font-size: clamp(18px, 5vw, 42px); letter-spacing: .28em;
+  color: #f66; text-transform: lowercase;
+  text-shadow: 0 0 18px #f00; background: #0006;
+  animation: flickerIn .3s ease;
+}
+.dread-blackout {
+  position: fixed; inset: 0; z-index: 500; background: #000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 24px;
+}
+.dread-blackout-msg {
+  font-family: "Courier New", monospace;
+  font-size: clamp(22px, 6vw, 48px); letter-spacing: .35em;
+  color: #c00; text-transform: lowercase;
+  animation: pulseRed 1.2s ease-in-out infinite;
+}
+.dread-final-face {
+  width: min(94vw, 640px); max-height: 78vh; object-fit: cover;
+  filter: contrast(2.4) brightness(1.15) saturate(1.2);
+  animation: scareUltra .22s steps(3, end);
+  box-shadow: 0 0 80px #400;
+}
+body.dread-ending, html.dread-ending { overflow: hidden !important; }
 
 @media (max-width: 700px) {
   .chaos-strip { min-height: 160vh; }
