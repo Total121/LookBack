@@ -1,0 +1,8 @@
+LOOK BACK
+=========
+
+1. cd web
+2. npm install
+3. npm run dev
+
+Open http://127.0.0.1:3947
