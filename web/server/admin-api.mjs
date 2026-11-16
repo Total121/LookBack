@@ -646,6 +646,30 @@ export async function handleAdminApi(req, res) {
   return true
 }
 
+function sendAdminIndex(res, req) {
+  const index = path.join(config.adminUiDir, 'index.html')
+  if (!fs.existsSync(index)) {
+    res.statusCode = 404
+    res.end()
+    return
+  }
+  // Absolute asset paths under adminPath — `./admin.js` breaks on /alb (no trailing slash)
+  let html = fs.readFileSync(index, 'utf8')
+  const base = config.adminPath.replace(/\/$/, '')
+  html = html
+    .replace(/(href|src)=["']\.\/admin\.css["']/g, `$1="${base}/admin.css"`)
+    .replace(/(href|src)=["']\.\/admin\.js["']/g, `$1="${base}/admin.js"`)
+    .replace(/(href|src)=["']\/alb\/admin\.(css|js)["']/g, `$1="${base}/admin.$2"`)
+  res.statusCode = 200
+  res.setHeader('Content-Type', 'text/html; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private')
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  res.end(html)
+}
+
 /** Serve admin UI at config.adminPath. Never linked from public site. */
 export function handleAdminUi(req, res) {
   const url = (req.url || '').split('?')[0]
@@ -658,13 +682,22 @@ export function handleAdminUi(req, res) {
     return true
   }
 
+  // Force trailing slash so relative URLs never escape the admin prefix
+  if (url === base) {
+    res.statusCode = 302
+    res.setHeader('Location', base + '/')
+    res.setHeader('Cache-Control', 'no-store')
+    res.end()
+    return true
+  }
+
   setSecurityHeaders(res, { admin: true, req })
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private')
 
-  let rel = url === base || url === base + '/' ? '/index.html' : url.slice(base.length)
+  let rel = url === base + '/' ? '/index.html' : url.slice(base.length)
   if (rel.includes('..')) {
     res.statusCode = 400
-    res.end('bad path')
+    res.end()
     return true
   }
 
@@ -674,31 +707,23 @@ export function handleAdminUi(req, res) {
     if (fs.existsSync(obf)) rel = '/admin.obf.js'
   }
 
+  if (rel === '/index.html' || rel === '/' || rel === '') {
+    sendAdminIndex(res, req)
+    return true
+  }
+
   const filePath = path.normalize(path.join(config.adminUiDir, rel))
   const adminBase = config.adminUiDir.endsWith(path.sep)
     ? config.adminUiDir
     : config.adminUiDir + path.sep
   if (filePath !== config.adminUiDir && !filePath.startsWith(adminBase)) {
     res.statusCode = 400
-    res.end('bad path')
+    res.end()
     return true
   }
 
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    // SPA-ish: always index for unknown admin routes
-    const index = path.join(config.adminUiDir, 'index.html')
-    if (fs.existsSync(index)) {
-      res.statusCode = 200
-      res.setHeader('Content-Type', 'text/html; charset=utf-8')
-      if (req.method === 'HEAD') {
-        res.end()
-        return true
-      }
-      fs.createReadStream(index).pipe(res)
-      return true
-    }
-    res.statusCode = 404
-    res.end('not found')
+    sendAdminIndex(res, req)
     return true
   }
 
