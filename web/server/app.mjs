@@ -226,11 +226,10 @@ export function createAppHandler({ isProd = false } = {}) {
       sendFile(res, filePath, {
         cache: ext === '.html' ? 'none' : ext === '.js' || ext === '.css' ? 'immutable' : 'default',
       })
-    } catch (e) {
-      console.error(e)
+    } catch {
       if (!res.headersSent) {
         res.statusCode = 500
-        res.end('server error')
+        res.end()
       }
     }
   }

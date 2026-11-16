@@ -191,12 +191,26 @@ type LibraryPayload = {
   updatedAt?: number
 }
 
+let libraryPromise: Promise<LibraryPayload | null> | null = null
+
+function loadLibrary(): Promise<LibraryPayload | null> {
+  if (!libraryPromise) {
+    libraryPromise = fetchJsonFresh<LibraryPayload>('/api/library').finally(() => {
+      // allow refresh on next cold boot of feed
+      setTimeout(() => {
+        libraryPromise = null
+      }, 30_000)
+    })
+  }
+  return libraryPromise
+}
+
 /**
  * Load the public library via opaque token URLs.
  * Real /media and /video paths never leave the server.
  */
 export async function loadAllPhotos(): Promise<PhotoStory[]> {
-  const data = await fetchJsonFresh<LibraryPayload>('/api/library')
+  const data = await loadLibrary()
   if (data?.photos?.length) {
     return data.photos.map((row, i) => {
       const title = row.title?.trim() || `STILL_${String(i).padStart(2, '0')}`
@@ -209,12 +223,11 @@ export async function loadAllPhotos(): Promise<PhotoStory[]> {
       }
     })
   }
-  // Offline / empty vault — no public path fallback (keeps F12 clean)
   return []
 }
 
 export async function loadAllVideos(): Promise<FeedVid[]> {
-  const data = await fetchJsonFresh<LibraryPayload>('/api/library')
+  const data = await loadLibrary()
   if (data?.videos?.length) {
     return data.videos.map((row, i) => {
       const label = row.title?.trim() || row.label || `CAM_${String(i).padStart(2, '0')}`
@@ -233,5 +246,5 @@ export async function loadAllVideos(): Promise<FeedVid[]> {
 
 /** Tiny preload for a fast loading screen — only opaque token URLs. */
 export function preloadSubset(photos: PhotoStory[], _videos: FeedVid[]) {
-  return photos.slice(0, 6).map((p) => p.src)
+  return photos.slice(0, 8).map((p) => p.src)
 }

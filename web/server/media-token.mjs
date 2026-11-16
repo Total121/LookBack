@@ -137,7 +137,7 @@ export function tokenUrl(src) {
 function mediaRateOk(ip) {
   const now = Date.now()
   const windowMs = 60_000
-  const max = 240
+  const max = 900
   const arr = (mediaHits.get(ip) || []).filter((t) => now - t < windowMs)
   if (arr.length >= max) {
     mediaHits.set(ip, arr)
@@ -167,17 +167,27 @@ export function sendVaultFile(req, res, absPath, { downloadName = null } = {}) {
   const type = MIME[ext] || 'application/octet-stream'
   const size = st.size
   const range = String(req.headers.range || '')
+  const etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`
   applyAnonHeaders(res, { https: false })
   res.setHeader('Accept-Ranges', 'bytes')
   res.setHeader('Content-Type', type)
-  res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate')
+  // Short private cache — speeds remount/scroll without letting CDNs store vault bytes
+  res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=60')
+  res.setHeader('ETag', etag)
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Content-Disposition', downloadName ? `inline; filename="${downloadName}"` : 'inline')
+  res.setHeader('Vary', 'Sec-Fetch-Dest')
   // Block naive hotlink / open-as-document when possible
   const dest = String(req.headers['sec-fetch-dest'] || '')
   if (dest === 'document') {
     res.statusCode = 403
-    res.end('forbidden')
+    res.end()
+    return
+  }
+  const inm = String(req.headers['if-none-match'] || '')
+  if (inm && inm === etag && !range) {
+    res.statusCode = 304
+    res.end()
     return
   }
 
@@ -257,7 +267,7 @@ export function handleOpaqueMedia(req, res) {
   }
   if (!mediaRateOk(ip)) {
     res.statusCode = 429
-    res.end('too many requests')
+    res.end()
     return true
   }
 
@@ -266,19 +276,19 @@ export function handleOpaqueMedia(req, res) {
     token = decodeURIComponent(url.slice(3))
   } catch {
     res.statusCode = 400
-    res.end('bad token')
+    res.end()
     return true
   }
   const src = verifyToken(token)
   if (!src) {
     res.statusCode = 404
-    res.end('not found')
+    res.end()
     return true
   }
   const abs = vaultAbs(src)
   if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
     res.statusCode = 404
-    res.end('not found')
+    res.end()
     return true
   }
   sendVaultFile(req, res, abs)

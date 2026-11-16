@@ -23,7 +23,7 @@ import { mountUploadButton } from './upload'
 import { installGuards } from './guard'
 import { enableTileDrag, resetDragLayer } from './drag'
 import { loadBoot, bootFaces, bootSfx } from './boot'
-import { cloakUrl, releaseCloak, clearCloakCache } from './cloak'
+import { bindOpaqueImg, clearCloakCache } from './cloak'
 
 const root = document.querySelector<HTMLDivElement>('#app')!
 const MAX_PLAYING_VIDEOS = 2
@@ -114,23 +114,18 @@ function openMediaStory(opts: {
     vid.loop = true
     vid.autoplay = true
     vid.muted = false
+    vid.preload = 'auto'
     vid.dataset.mediaSrc = opts.src
-    void cloakUrl(opts.src).then((url) => {
-      if (!vid.isConnected) {
-        releaseCloak(opts.src)
-        return
-      }
-      vid.src = url
-      void vid.play().catch(() => {
-        vid.muted = true
-        void vid.play().catch(() => {})
-      })
+    vid.src = opts.src
+    void vid.play().catch(() => {
+      vid.muted = true
+      void vid.play().catch(() => {})
     })
     media = vid
   } else {
     const img = document.createElement('img')
     img.className = 'hero'
-    applyCloakedImg(img, opts.src)
+    bindOpaqueImg(img, opts.src, { lazy: false, priority: 'high' })
     media = img
   }
 
@@ -223,18 +218,10 @@ function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, logicalSrc: strin
       for (const e of entries) {
         if (e.isIntersecting) {
           if (!vid.getAttribute('src')) {
-            void cloakUrl(logicalSrc).then((url) => {
-              if (!vid.isConnected) {
-                releaseCloak(logicalSrc)
-                return
-              }
-              vid.dataset.mediaSrc = logicalSrc
-              vid.setAttribute('src', url)
-              vid.load()
-              void vid.play().catch(() => {})
-            })
-          } else {
-            void vid.play().catch(() => {})
+            vid.dataset.mediaSrc = logicalSrc
+            vid.preload = 'metadata'
+            vid.src = logicalSrc
+            vid.load()
           }
           if (playingVideos.size >= MAX_PLAYING_VIDEOS) {
             const first = playingVideos.values().next().value
@@ -243,24 +230,24 @@ function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, logicalSrc: strin
               playingVideos.delete(first)
             }
           }
+          void vid.play().catch(() => {})
           playingVideos.add(vid)
         } else {
           vid.pause()
           playingVideos.delete(vid)
-          if (e.intersectionRatio === 0 && e.boundingClientRect.bottom < -400) {
-            const src = vid.dataset.mediaSrc || logicalSrc
+          // Keep src so revisit is instant from HTTP cache; only drop far-away decoded frames
+          if (e.intersectionRatio === 0 && e.boundingClientRect.bottom < -900) {
             vid.removeAttribute('src')
             try {
               vid.load()
             } catch {
               /* ignore */
             }
-            if (src) releaseCloak(src)
           }
         }
       }
     },
-    { threshold: 0.2, rootMargin: '120px' },
+    { threshold: 0.15, rootMargin: '280px 0px' },
   )
   io.observe(vid)
   const bag = (strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos || []
@@ -272,8 +259,6 @@ function teardownStripMedia(strip: HTMLElement) {
   strip.querySelectorAll('video').forEach((v) => {
     v.pause()
     playingVideos.delete(v)
-    const src = v.dataset.mediaSrc || v.getAttribute('src') || ''
-    if (src) releaseCloak(src)
     v.removeAttribute('src')
     try {
       v.load()
@@ -281,16 +266,12 @@ function teardownStripMedia(strip: HTMLElement) {
       /* ignore */
     }
   })
-  strip.querySelectorAll('img').forEach((img) => {
-    const src = img.dataset.mediaSrc || ''
-    if (src) releaseCloak(src)
-  })
   const bag = (strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos
   bag?.forEach((o) => o.disconnect())
   ;(strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos = []
 }
 
-/** Unmount tile DOM but keep the strip shell so scroll-up can remount. */
+/** Unmount only when far from viewport — remount restores tiles via cached /m/ URLs. */
 function unmountStrip(strip: HTMLElement) {
   if (!stripMounted.has(strip)) return
   teardownStripMedia(strip)
@@ -306,10 +287,16 @@ function ensureStripObserver() {
         const strip = e.target as HTMLElement
         if (!strip.classList.contains('chaos-strip')) continue
         if (e.isIntersecting) mountStrip(strip)
-        else unmountStrip(strip)
+        else {
+          // Keep nearby strips warm; only drop when well off-screen
+          const r = e.boundingClientRect
+          if (r.bottom < -window.innerHeight * 1.5 || r.top > window.innerHeight * 2.5) {
+            unmountStrip(strip)
+          }
+        }
       }
     },
-    { root: null, rootMargin: '140% 0px', threshold: 0 },
+    { root: null, rootMargin: '200% 0px', threshold: 0 },
   )
 }
 
@@ -396,25 +383,13 @@ function buildTileSpecs(count: number): TileSpec[] {
   return specs
 }
 
-function applyCloakedImg(img: HTMLImageElement, src: string) {
-  img.dataset.mediaSrc = src
-  img.alt = ''
-  img.decoding = 'async'
-  void cloakUrl(src).then((url) => {
-    if (!img.isConnected) {
-      releaseCloak(src)
-      return
-    }
-    img.src = url
-  })
-}
-
 function mountStrip(strip: HTMLElement) {
   if (stripMounted.has(strip)) return
   const specs = stripSpecs.get(strip)
   if (!specs) return
   stripMounted.add(strip)
   const frag = document.createDocumentFragment()
+  let photoI = 0
 
   for (const spec of specs) {
     const tile = document.createElement('div')
@@ -425,7 +400,12 @@ function mountStrip(strip: HTMLElement) {
       const p = spec.photo!
       const img = document.createElement('img')
       if (spec.filter) img.style.filter = 'contrast(1.55) grayscale(.8) brightness(.7)'
-      applyCloakedImg(img, p.src)
+      const eager = photoI < 6
+      photoI++
+      bindOpaqueImg(img, p.src, {
+        lazy: !eager,
+        priority: eager ? 'high' : 'auto',
+      })
       const cap = document.createElement('div')
       cap.className = 'cap'
       cap.textContent = p.title
@@ -582,11 +562,14 @@ async function preloadSome(urls: string[], onProgress: (pct: number, label: stri
     done++
     onProgress(Math.round((done / total) * 100), label)
   }
-  await Promise.all(
-    urls.map(async (url) => {
+  // Bounded concurrency — fills the loading bar without saturating the pipe
+  const queue = [...urls]
+  const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
+    while (queue.length) {
+      const url = queue.shift()!
       try {
-        if (url.endsWith('.wav')) {
-          await fetch(url, { cache: 'force-cache' })
+        if (/\.(wav|mp3|ogg)(\?|$)/i.test(url)) {
+          await fetch(url, { cache: 'force-cache', credentials: 'same-origin' })
         } else {
           await new Promise<void>((resolve) => {
             const img = new Image()
@@ -600,8 +583,9 @@ async function preloadSome(urls: string[], onProgress: (pct: number, label: stri
         /* ignore */
       }
       bump('opening…')
-    }),
-  )
+    }
+  })
+  await Promise.all(workers)
 }
 
 function ensureChrome() {

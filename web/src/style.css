@@ -247,10 +247,9 @@ body::before {
   border: 1px solid #400;
   overflow: hidden;
   cursor: pointer;
-  background: #050000;
+  background: #050000 linear-gradient(145deg, #120000 0%, #050000 55%, #0a0000 100%);
   box-shadow: 0 0 12px #100;
   touch-action: none;
-  will-change: transform;
   transform: translateZ(0);
 }
 .tile.draggable { cursor: grab; }

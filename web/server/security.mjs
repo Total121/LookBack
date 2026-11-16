@@ -40,13 +40,15 @@ export function sendJson(res, status, body) {
 export function applyAnonHeaders(res, { admin = false, https = false } = {}) {
   res.removeHeader('X-Powered-By')
   res.removeHeader('Server')
+  res.removeHeader('X-AspNet-Version')
+  res.removeHeader('X-AspNetMvc-Version')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
   res.setHeader('Referrer-Policy', 'no-referrer')
   res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet, noimageindex')
   res.setHeader(
     'Permissions-Policy',
-    'accelerometer=(), camera=(self), display-capture=(), geolocation=(), gyroscope=(), interest-cohort=(), magnetometer=(), microphone=(), payment=(), usb=()',
+    'accelerometer=(), camera=(self), display-capture=(), geolocation=(), gyroscope=(), interest-cohort=(), magnetometer=(), microphone=(), payment=(), usb=(), browsing-topics=()',
   )
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
