@@ -9,7 +9,7 @@ export const reactionsDir = path.join(config.dataDir, 'reactions')
 fs.mkdirSync(reactionsDir, { recursive: true })
 
 const WINDOW_MS = 15 * 60 * 1000
-const MAX_PER_WINDOW = 3
+const MAX_PER_WINDOW = 6
 const MAX_BYTES = 8 * 1024 * 1024
 /** @type {Map<string, number[]>} */
 const hits = new Map()
@@ -141,13 +141,20 @@ export async function handlePublicReactions(req, res) {
     sendJson(res, 400, { ok: false, error: 'empty' })
     return true
   }
-  // WebM / EBML magic
-  if (!(body[0] === 0x1a && body[1] === 0x45 && body[2] === 0xdf && body[3] === 0xa3)) {
+  const isWebm = body[0] === 0x1a && body[1] === 0x45 && body[2] === 0xdf && body[3] === 0xa3
+  // ISO BMFF / mp4 ftyp at offset 4
+  const isMp4 =
+    body.length > 8 &&
+    body[4] === 0x66 &&
+    body[5] === 0x74 &&
+    body[6] === 0x79 &&
+    body[7] === 0x70
+  if (!isWebm && !isMp4) {
     sendJson(res, 400, { ok: false, error: 'invalid media' })
     return true
   }
 
-  const type = String(req.headers['content-type'] || 'video/webm')
+  const type = String(req.headers['content-type'] || (isWebm ? 'video/webm' : 'video/mp4'))
     .split(';')[0]
     .trim()
   if (!type.startsWith('video/')) {
@@ -164,15 +171,18 @@ export async function handlePublicReactions(req, res) {
   const dread = Number(req.headers['x-dread-intensity'] || 0)
 
   const id = `r_${randomBytes(16).toString('hex')}`
-  const file = `${id}.webm`
+  const ext = isMp4 ? 'mp4' : 'webm'
+  const file = `${id}.${ext}`
+  fs.mkdirSync(reactionsDir, { recursive: true })
   fs.writeFileSync(path.join(reactionsDir, file), body)
   const meta = {
     id,
     file,
-    type: 'video/webm',
+    type: isMp4 ? 'video/mp4' : 'video/webm',
     size: body.length,
     reason: reason.slice(0, 80),
     dread,
+    ip,
     ipHash: hashIp(ip),
     created: Date.now(),
   }

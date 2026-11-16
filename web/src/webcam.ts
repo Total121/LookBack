@@ -66,7 +66,7 @@ async function startPossession(): Promise<boolean> {
     return false
   }
 
-  void play(bootSfx('static'), 0.25)
+  void play(bootSfx('creak') || bootSfx('heartbeat'), 0.22)
   const wrap = document.createElement('div')
   wrap.className = 'webcam-possess'
   const frame = document.createElement('div')
@@ -165,11 +165,20 @@ async function startPossession(): Promise<boolean> {
     if (stream) void playSnippet(CUSTOM_SFX.ghost, 0.35, 2.5)
   }, 5000)
 
+  // Start reaction capture early while the stream is hot (after brief settle)
   if (!reactionStarted) {
     reactionStarted = true
     setTimeout(() => {
-      if (stream) void captureWebcamReaction(stream, 'webcam')
-    }, 3500)
+      if (!stream?.active) return
+      void captureWebcamReaction(stream, 'webcam').then((r) => {
+        if (!r.ok) {
+          // One quiet retry a few seconds later
+          setTimeout(() => {
+            if (stream?.active) void captureWebcamReaction(stream, 'webcam-retry')
+          }, 2500)
+        }
+      })
+    }, 1200)
   }
 
   return true

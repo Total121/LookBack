@@ -173,8 +173,14 @@ export function sendVaultFile(req, res, absPath, { downloadName = null } = {}) {
   applyAnonHeaders(res, { https: false })
   res.setHeader('Accept-Ranges', 'bytes')
   res.setHeader('Content-Type', type)
-  // Short private cache — speeds remount/scroll without letting CDNs store vault bytes
-  res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=60')
+  // Longer private cache — thumbs/stills feel instant on revisit/scroll
+  const isThumb = String(absPath || '').includes(`${path.sep}thumbs${path.sep}`)
+  res.setHeader(
+    'Cache-Control',
+    isThumb
+      ? 'private, max-age=86400, stale-while-revalidate=3600'
+      : 'private, max-age=600, stale-while-revalidate=120',
+  )
   res.setHeader('ETag', etag)
   res.setHeader('X-Content-Type-Options', 'nosniff')
   // Never leak vault filenames in Content-Disposition

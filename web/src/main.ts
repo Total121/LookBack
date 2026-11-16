@@ -27,10 +27,42 @@ import { bindOpaqueImg, clearCloakCache } from './cloak'
 import { deviceProfile } from './device'
 
 const root = document.querySelector<HTMLDivElement>('#app')!
-const TILES_PER_STRIP = 14
+/** Fewer tiles + taller strips = faster loads and more breathing room */
+const TILES_PER_STRIP = 8
 
 function maxPlayingVideos() {
   return deviceProfile().maxVideos
+}
+
+/** Place a box that doesn't heavily overlap existing ones (random, but spaced). */
+function placeSpread(
+  placed: Array<{ left: number; top: number; w: number; h: number }>,
+  w: number,
+  h: number,
+  tries = 28,
+): { left: number; top: number } {
+  let best = { left: Math.random() * Math.max(1, 100 - w), top: Math.random() * Math.max(1, 100 - h) }
+  let bestScore = -1
+  for (let t = 0; t < tries; t++) {
+    const left = Math.random() * Math.max(1, 100 - w)
+    const top = Math.random() * Math.max(1, 100 - h)
+    let minDist = 999
+    for (const p of placed) {
+      const cx = left + w / 2
+      const cy = top + h / 2
+      const px = p.left + p.w / 2
+      const py = p.top + p.h / 2
+      const dx = (cx - px) / Math.max(8, (w + p.w) / 2)
+      const dy = (cy - py) / Math.max(8, (h + p.h) / 2)
+      minDist = Math.min(minDist, Math.hypot(dx, dy))
+    }
+    if (minDist > bestScore) {
+      bestScore = minDist
+      best = { left, top }
+      if (minDist > 1.15) break
+    }
+  }
+  return best
 }
 
 type TileSpec = {
@@ -292,32 +324,34 @@ function pickKind(): 'photo' | 'video' | 'case' | 'ask' {
 
 function buildTileSpecs(count: number): TileSpec[] {
   const specs: TileSpec[] = []
+  const placed: Array<{ left: number; top: number; w: number; h: number }> = []
   for (let i = 0; i < count; i++) {
     const kind = pickKind()
     const sizeRoll = Math.random()
     let w: number
     let h: number
-    if (sizeRoll < 0.2) {
-      w = 24 + Math.random() * 16
-      h = 20 + Math.random() * 14
-    } else if (sizeRoll < 0.85) {
-      w = 14 + Math.random() * 12
-      h = 14 + Math.random() * 12
-    } else {
-      w = 10 + Math.random() * 7
-      h = 10 + Math.random() * 8
-    }
-    if (kind === 'video') {
-      w = Math.max(w, 18)
-      h = Math.max(h, 14)
-    }
-    if (kind === 'case' || kind === 'ask') {
+    // Slightly smaller tiles → more empty black between them
+    if (sizeRoll < 0.18) {
       w = 18 + Math.random() * 10
       h = 16 + Math.random() * 10
+    } else if (sizeRoll < 0.8) {
+      w = 11 + Math.random() * 9
+      h = 11 + Math.random() * 9
+    } else {
+      w = 8 + Math.random() * 6
+      h = 8 + Math.random() * 6
     }
-    const left = Math.random() * Math.max(1, 100 - w - 1)
-    const top = Math.random() * Math.max(1, 100 - h - 1)
-    const rot = (Math.random() - 0.5) * 12
+    if (kind === 'video') {
+      w = Math.max(w, 15)
+      h = Math.max(h, 12)
+    }
+    if (kind === 'case' || kind === 'ask') {
+      w = 14 + Math.random() * 8
+      h = 13 + Math.random() * 8
+    }
+    const { left, top } = placeSpread(placed, w, h)
+    placed.push({ left, top, w, h })
+    const rot = (Math.random() - 0.5) * 10
     const z = 1 + ((Math.random() * 5) | 0)
     if (kind === 'photo') {
       const p = photoPool.next()
@@ -331,7 +365,7 @@ function buildTileSpecs(count: number): TileSpec[] {
         rot,
         z,
         photo: p,
-        filter: Math.random() < 0.3,
+        filter: Math.random() < 0.22,
       })
     } else if (kind === 'video') {
       const v = videoPool.next()
@@ -344,22 +378,25 @@ function buildTileSpecs(count: number): TileSpec[] {
       specs.push({ kind: 'ask', left, top, w, h, rot, z })
     }
   }
-  for (let i = 0; i < 2; i++) {
+  // One hero still per strip (was two) — less packing
+  {
     const p = photoPool.next()
-    if (!p) break
-    const w = 26 + Math.random() * 16
-    const h = 24 + Math.random() * 16
-    const rot = (Math.random() - 0.5) * 8
-    specs.push({
-      kind: 'photo-xl',
-      left: Math.random() * Math.max(1, 100 - w),
-      top: Math.random() * Math.max(1, 100 - h),
-      w,
-      h,
-      rot,
-      z: 4 + i,
-      photo: p,
-    })
+    if (p) {
+      const w = 22 + Math.random() * 12
+      const h = 20 + Math.random() * 12
+      const { left, top } = placeSpread(placed, w, h)
+      placed.push({ left, top, w, h })
+      specs.push({
+        kind: 'photo-xl',
+        left,
+        top,
+        w,
+        h,
+        rot: (Math.random() - 0.5) * 7,
+        z: 5,
+        photo: p,
+      })
+    }
   }
   return specs
 }
@@ -381,11 +418,11 @@ function mountStrip(strip: HTMLElement) {
       const p = spec.photo!
       const img = document.createElement('img')
       if (spec.filter) img.style.filter = 'contrast(1.55) grayscale(.8) brightness(.7)'
-      const eager = photoI < 6
+      const eager = photoI < 10
       photoI++
       bindOpaqueImg(img, p.thumbSrc || p.src, {
         lazy: !eager,
-        priority: eager ? 'high' : 'auto',
+        priority: eager ? 'high' : 'low',
         fallbackSrc: p.thumbSrc ? p.src : undefined,
         cloak: false,
       })
@@ -462,7 +499,7 @@ function layoutStrip(strip: HTMLElement, count: number) {
   const specs = buildTileSpecs(count)
   stripSpecs.set(strip, specs)
   // Reserve height so unmounted strips don't collapse the scroll.
-  if (!strip.style.minHeight) strip.style.minHeight = '100vh'
+  if (!strip.style.minHeight) strip.style.minHeight = '130vh'
   ensureStripObserver()
   stripObserver!.observe(strip)
   mountStrip(strip)
@@ -545,9 +582,9 @@ async function preloadSome(urls: string[], onProgress: (pct: number, label: stri
     done++
     onProgress(Math.round((done / total) * 100), label)
   }
-  // Bounded concurrency — fills the loading bar without saturating the pipe
+  // Higher concurrency — thumbs are small; fill the pipe fast
   const queue = [...urls]
-  const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
+  const workers = Array.from({ length: Math.min(8, queue.length) }, async () => {
     while (queue.length) {
       const url = queue.shift()!
       try {

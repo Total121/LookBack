@@ -158,7 +158,7 @@ body::before {
 .chaos-strip {
   position: relative;
   width: 100%;
-  min-height: 100vh;
+  min-height: 130vh;
   margin: 0;
 }
 .chaos-free {
@@ -649,6 +649,6 @@ body.dread-soft .tile video {
 }
 
 @media (max-width: 700px) {
-  .chaos-strip { min-height: 140vh; }
+  .chaos-strip { min-height: 150vh; }
   .tile { box-shadow: 0 0 8px #100; }
 }

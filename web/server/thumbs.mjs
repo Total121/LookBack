@@ -7,8 +7,10 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { config } from './config.mjs'
 
-const THUMB_EDGE = 720
-const THUMB_QUALITY = 78
+// Smaller feed thumbs = much faster collage paint (full originals still for tear)
+const THUMB_EDGE = 480
+const THUMB_QUALITY = 68
+const THUMB_VERSION = 'thumb-v2'
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 
 let sharpMod = null
@@ -33,7 +35,7 @@ export function thumbRelForSrc(src) {
   const ext = path.extname(src).toLowerCase()
   if (!IMAGE_EXT.has(ext)) return null
   const id = createHash('sha256')
-    .update('thumb-v1:' + src)
+    .update(THUMB_VERSION + ':' + src)
     .digest('base64url')
     .slice(0, 22)
   return `/media/thumbs/${id}.webp`

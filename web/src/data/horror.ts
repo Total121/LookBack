@@ -263,7 +263,7 @@ export async function loadAllVideos(): Promise<FeedVid[]> {
   return []
 }
 
-/** Tiny preload for a fast loading screen — prefer thumbs when present. */
+/** Preload first collage thumbs for a snappy enter. */
 export function preloadSubset(photos: PhotoStory[], _videos: FeedVid[]) {
-  return photos.slice(0, 8).map((p) => p.thumbSrc || p.src)
+  return photos.slice(0, 12).map((p) => p.thumbSrc || p.src)
 }

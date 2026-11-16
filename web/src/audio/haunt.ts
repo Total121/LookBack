@@ -10,7 +10,6 @@ let activeSources: AudioBufferSourceNode[] = []
 let imgWarm = false
 let bedSource: AudioBufferSourceNode | null = null
 let bedGain: GainNode | null = null
-let bedWanted = false
 
 const bufferCache = new Map<string, AudioBuffer>()
 const inflight = new Map<string, Promise<AudioBuffer | null>>()
@@ -85,15 +84,14 @@ function impactPool() {
 }
 
 function ambientPool() {
+  // No static/white-noise loops — those felt like constant "shhh"
   return [
     CUSTOM_SFX.watching,
     CUSTOM_SFX.ghost,
     CUSTOM_SFX.laugh,
     sfx('whisper'),
-    sfx('breath'),
     sfx('creak'),
     sfx('heartbeat'),
-    sfx('static'),
     sfx('ghost2'),
   ].filter(Boolean)
 }
@@ -205,40 +203,9 @@ export function stopAllHauntAudio() {
   stopAmbientBed()
 }
 
-function bedCandidates() {
-  return [sfx('heartbeat'), sfx('static'), sfx('breath'), sfx('creak'), CUSTOM_SFX.watching].filter(Boolean)
-}
-
-/** Quiet continuous bed under the collage — ducks during jumpscares. */
-export async function startAmbientBed(volume = 0.045) {
-  bedWanted = true
-  try {
-    const c = ctx()
-    if (c.state === 'suspended') await c.resume()
-    if (bedSource) return
-    const url = pick(bedCandidates())
-    if (!url) return
-    const buf = await loadBuffer(url)
-    if (!buf || !bedWanted) return
-    const src = c.createBufferSource()
-    const g = c.createGain()
-    g.gain.value = volume
-    src.buffer = buf
-    src.loop = true
-    src.connect(g)
-    g.connect(c.destination)
-    src.start(0)
-    bedSource = src
-    bedGain = g
-    src.onended = () => {
-      if (bedSource === src) {
-        bedSource = null
-        bedGain = null
-      }
-    }
-  } catch {
-    /* ignore */
-  }
+/** Continuous bed disabled — caused constant static/"shh" noise. */
+export async function startAmbientBed(_volume = 0.045) {
+  stopAmbientBed()
 }
 
 export function setAmbientBedVolume(v: number) {
@@ -259,7 +226,6 @@ export function duckAmbientBed(ms = 900) {
 }
 
 export function stopAmbientBed() {
-  bedWanted = false
   if (bedSource) {
     try {
       bedSource.stop()
@@ -286,15 +252,16 @@ export async function armHaunt() {
 
 export function maybeAmbientSting(intensity = 0) {
   const now = Date.now()
-  const cooldown = Math.max(18000, 55000 - intensity * 25000)
+  // Rarer + quieter — never a continuous bed
+  const cooldown = Math.max(28000, 70000 - intensity * 28000)
   if (now - lastAmbient < cooldown) return
-  if (Math.random() > 0.22 + intensity * 0.25) return
+  if (Math.random() > 0.14 + intensity * 0.18) return
   lastAmbient = now
   const pool = ambientPool()
   if (!pool.length) return
   const url = pick(pool)
-  const vol = 0.14 + intensity * 0.22 + Math.random() * 0.08
-  if (url.includes('/m/')) void playSnippet(url, vol, 1.6 + intensity * 2.2)
+  const vol = 0.1 + intensity * 0.16 + Math.random() * 0.05
+  if (url.includes('/m/')) void playSnippet(url, vol, 1.2 + intensity * 1.6)
   else void play(url, vol)
 }
 

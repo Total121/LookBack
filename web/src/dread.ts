@@ -11,8 +11,6 @@ import {
   playSnippet,
   CUSTOM_SFX,
   stopAllHauntAudio,
-  startAmbientBed,
-  setAmbientBedVolume,
   stopAmbientBed,
   duckAmbientBed,
 } from './audio/haunt'
@@ -39,8 +37,8 @@ export function setDreadMultiplier(n: number) {
 
 export function setAmbientEnabled(v: boolean) {
   ambientOn = Boolean(v)
-  if (!ambientOn) stopAmbientBed()
-  else if (startedAt && !endingDone) void startAmbientBed(bedVol())
+  // Continuous bed removed — only rare stings when ambient is on
+  stopAmbientBed()
 }
 
 export function sessionAgeMs() {
@@ -70,12 +68,6 @@ function softMode() {
 
 function tickMs() {
   return softMode() ? 4200 : 2800
-}
-
-function bedVol() {
-  const intensity = dreadIntensity()
-  const base = softMode() ? 0.028 : 0.042
-  return base + intensity * (softMode() ? 0.02 : 0.035)
 }
 
 function ensureLayer() {
@@ -158,9 +150,9 @@ function tick() {
   const layer = ensureLayer()
   layer.dataset.tier = String(t)
   layer.style.setProperty('--dread', String(intensity))
-  setAmbientBedVolume(bedVol())
 
-  if (ambientOn && t >= 1) maybeAmbientSting(intensity * (soft ? 0.7 : 1))
+  // Sparse stings only — no looping static/shh bed
+  if (ambientOn && t >= 2) maybeAmbientSting(intensity * (soft ? 0.55 : 0.85))
 
   const glitchChance = (0.04 + t * 0.06 + intensity * 0.08) * (soft ? 0.45 : 1)
   if (Math.random() < glitchChance) glitchBurst(t >= 3 && !soft)
@@ -288,10 +280,7 @@ export function startDread() {
     document.body.classList.toggle('dread-soft', softMode())
   }
   timer = window.setInterval(tick, tickMs())
-  if (ambientOn) {
-    window.setTimeout(() => void startAmbientBed(bedVol()), softMode() ? 4000 : 2500)
-  }
-  window.setTimeout(() => maybeAmbientSting(0.05), softMode() ? 16000 : 12000)
+  stopAmbientBed()
 }
 
 export function stopDread() {
