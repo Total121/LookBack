@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 3947",
@@ -13,7 +13,7 @@
     "start": "node server/index.mjs",
     "obfuscate:admin": "node scripts/obfuscate-admin.mjs"
   },
-  "devDependencies": {
+  "dependencies": {
     "javascript-obfuscator": "^4.1.1",
     "terser": "^5.44.0",
     "typescript": "~7.0.2",

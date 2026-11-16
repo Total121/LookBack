@@ -11,7 +11,8 @@ services:
     plan: free
     region: oregon
     rootDir: web
-    buildCommand: npm ci && npm run build
+    # --include=dev so tooling installs even when NODE_ENV=production
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/public/config
     autoDeployTrigger: commit
