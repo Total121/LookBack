@@ -31,18 +31,26 @@ async function toBlobUrl(src: string): Promise<string> {
   return job
 }
 
-/** Paint immediately via opaque token, then quietly swap to blob when idle. */
+/**
+ * Paint immediately via opaque token.
+ * Optional fallbackSrc used if primary fails (e.g. thumb → full).
+ * Cloak is off by default — blob swapping caused blank tiles under load.
+ */
 export function bindOpaqueImg(
   img: HTMLImageElement,
   src: string,
   opts: {
     priority?: 'high' | 'low' | 'auto'
     lazy?: boolean
-    /** Skip blob cloak (saves a second download on constrained devices). */
+    fallbackSrc?: string
+    /** Rarely useful; keep false for feed tiles. */
     cloak?: boolean
   } = {},
 ) {
-  img.dataset.mediaSrc = src
+  const primary = src
+  const fallback = opts.fallbackSrc && opts.fallbackSrc !== src ? opts.fallbackSrc : ''
+  img.dataset.mediaSrc = primary
+  if (fallback) img.dataset.fallbackSrc = fallback
   img.alt = ''
   img.decoding = 'async'
   if (opts.lazy !== false) img.loading = 'lazy'
@@ -54,18 +62,29 @@ export function bindOpaqueImg(
       /* ignore */
     }
   }
-  img.src = src
 
-  if (opts.cloak === false) return
+  img.onerror = () => {
+    const next = img.dataset.fallbackSrc
+    if (next && img.src !== next && !img.src.endsWith(next)) {
+      delete img.dataset.fallbackSrc
+      img.dataset.mediaSrc = next
+      img.src = next
+      return
+    }
+    img.onerror = null
+  }
+
+  img.src = primary
+
+  if (opts.cloak !== true) return
 
   const cloak = () => {
     if (!img.isConnected || img.dataset.cloaked === '1') return
     const run = () => {
-      void toBlobUrl(src).then((url) => {
-        if (!img.isConnected || url === src) return
+      void toBlobUrl(img.dataset.mediaSrc || primary).then((url) => {
+        if (!img.isConnected || url === (img.dataset.mediaSrc || primary)) return
         img.dataset.cloaked = '1'
         img.src = url
-        delete img.dataset.mediaSrc
       })
     }
     if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2500 })

@@ -132,7 +132,7 @@ function openMediaStory(opts: {
     bindOpaqueImg(img, opts.src, {
       lazy: false,
       priority: 'high',
-      cloak: deviceProfile().cloakFeed,
+      cloak: false,
     })
     media = img
   }
@@ -263,30 +263,10 @@ function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, logicalSrc: strin
   ;(strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos = bag
 }
 
-function teardownStripMedia(strip: HTMLElement) {
-  strip.querySelectorAll('video').forEach((v) => {
-    v.pause()
-    playingVideos.delete(v)
-    v.removeAttribute('src')
-    try {
-      v.load()
-    } catch {
-      /* ignore */
-    }
-  })
-  const bag = (strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos
-  bag?.forEach((o) => o.disconnect())
-  ;(strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos = []
-}
-
-/** Unmount only when far from viewport — remount restores tiles via cached /m/ URLs. */
-function unmountStrip(strip: HTMLElement) {
-  if (!stripMounted.has(strip)) return
-  teardownStripMedia(strip)
-  strip.replaceChildren()
-  stripMounted.delete(strip)
-}
-
+/**
+ * Keep strip tile DOM mounted once created — unmounting caused blank gaps
+ * when observers raced or remounts hit rate limits. Far-away videos still pause.
+ */
 function ensureStripObserver() {
   if (stripObserver) return
   stripObserver = new IntersectionObserver(
@@ -295,16 +275,9 @@ function ensureStripObserver() {
         const strip = e.target as HTMLElement
         if (!strip.classList.contains('chaos-strip')) continue
         if (e.isIntersecting) mountStrip(strip)
-        else {
-          // Keep nearby strips warm; only drop when well off-screen
-          const r = e.boundingClientRect
-          if (r.bottom < -window.innerHeight * 1.5 || r.top > window.innerHeight * 2.5) {
-            unmountStrip(strip)
-          }
-        }
       }
     },
-    { root: null, rootMargin: '200% 0px', threshold: 0 },
+    { root: null, rootMargin: '120% 0px', threshold: 0 },
   )
 }
 
@@ -413,7 +386,8 @@ function mountStrip(strip: HTMLElement) {
       bindOpaqueImg(img, p.thumbSrc || p.src, {
         lazy: !eager,
         priority: eager ? 'high' : 'auto',
-        cloak: deviceProfile().cloakFeed,
+        fallbackSrc: p.thumbSrc ? p.src : undefined,
+        cloak: false,
       })
       const cap = document.createElement('div')
       cap.className = 'cap'
