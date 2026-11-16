@@ -44,12 +44,23 @@ Set these in Render → Service → Environment (do **not** commit them):
 
 Turnstile: https://dash.cloudflare.com/ → Turnstile → add your `*.onrender.com` host.
 
-## 4. After deploy
+## 4. Live service (already created)
 
-- Public site: `https://<service>.onrender.com`
-- Admin: `https://<service>.onrender.com/alb` (not linked from the site)
+- Public site: **https://lookback-x8jo.onrender.com**
+- Admin: **https://lookback-x8jo.onrender.com/alb** (not linked from the site)
+- Dashboard: https://dashboard.render.com/web/srv-dbthfeui0phs73f2bs50
 
 First boot after idle sleep can take ~30–60s.
+
+### Replace bootstrap secrets
+
+The first deploy used temporary admin credentials + Cloudflare Turnstile **test** keys (`1x0000…`) so the box could boot. In Render → Environment, replace:
+
+1. `ADMIN_USERNAME` / `ADMIN_PASSWORD` with yours  
+2. `SESSION_SECRET` with a fresh long random secret  
+3. `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` with your real Cloudflare Turnstile keys (add host `lookback-x8jo.onrender.com`)  
+
+Then **Manual Deploy → Clear build cache & deploy**.
 
 ## 5. Local Docker check (optional)
 
