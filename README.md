@@ -15,7 +15,7 @@ Open `http://127.0.0.1:3947`
 
 Admin panel (not linked anywhere on the public site): `http://127.0.0.1:3947/alb`
 
-## Production
+## Production (local)
 
 ```bash
 cd web
@@ -23,7 +23,12 @@ npm run build
 npm start
 ```
 
-`npm start` serves the obfuscated `dist/` build, live `/media` + `/video` from `public/`, upload API, and `/alb`.
+`npm start` serves the obfuscated `dist/` build, vault media via opaque `/m/` tokens, upload API, and `/alb`.
+
+## Deploy (free)
+
+This is a long-running Node + vault app — **not** a Vercel static/serverless fit.
+Use **Render** (Docker). Full steps + env checklist: [`DEPLOY.md`](./DEPLOY.md).
 
 ## Uploads
 

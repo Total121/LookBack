@@ -35,11 +35,16 @@ function req(name, fallback = '') {
 
 const weak = new Set(['', 'changeme', 'password', 'admin', 'secret', '123456'])
 
+const isCloud =
+  Boolean(process.env.RENDER || process.env.RAILWAY_ENVIRONMENT || process.env.FLY_APP_NAME) ||
+  req('CLOUD', 'false') === 'true'
+
 export const config = {
-  host: req('HOST', '127.0.0.1'),
+  // Cloud hosts must bind all interfaces; local defaults to loopback
+  host: req('HOST', isCloud ? '0.0.0.0' : '127.0.0.1'),
   port: Number(req('PORT', '3947')),
-  // Default false — only enable behind a real reverse proxy / Cloudflare
-  trustProxy: req('TRUST_PROXY', 'false') === 'true',
+  // Trust proxy hop on managed hosts (Render / Railway / Fly / Cloudflare)
+  trustProxy: req('TRUST_PROXY', isCloud ? 'true' : 'false') === 'true',
   adminUsername: req('ADMIN_USERNAME', ''),
   adminPassword: req('ADMIN_PASSWORD', ''),
   sessionSecret: req('SESSION_SECRET', ''),
