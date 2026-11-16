@@ -1,11 +1,12 @@
-import { createAppHandler } from './server/app.mjs'
+import { createAppHandler, config } from './server/app.mjs'
 
 /**
- * Vite plugin: upload API + admin (/alb) in dev and preview.
+ * Vite plugin: upload API + admin UI in dev and preview.
  * Public Vite app is left to Vite; API/admin are intercepted first.
  */
 export function uploadLimitPlugin() {
   const handler = createAppHandler({ isProd: false })
+  const adminBase = config.adminPath
 
   const attach = (server) => {
     server.middlewares.use((req, res, next) => {
@@ -13,15 +14,14 @@ export function uploadLimitPlugin() {
       if (
         url.startsWith('/api/') ||
         url.startsWith('/m/') ||
-        url === '/alb' ||
-        url.startsWith('/alb/') ||
+        url === adminBase ||
+        url.startsWith(adminBase + '/') ||
         url.startsWith('/media/') ||
         url.startsWith('/video/') ||
         url.startsWith('/sfx/') ||
         url === '/media-index.json' ||
         url === '/video-index.json'
       ) {
-        // opaque media + APIs; block direct vault/public asset leaks in dev
         Promise.resolve(handler(req, res, next)).catch(next)
         return
       }
@@ -30,7 +30,7 @@ export function uploadLimitPlugin() {
   }
 
   return {
-    name: 'lookback-server',
+    name: 'app-server',
     configureServer: attach,
     configurePreviewServer: attach,
   }

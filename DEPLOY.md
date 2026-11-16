@@ -1,70 +1,38 @@
-# Deploy LOOK BACK (free / secure)
+# Deploy
 
-## Why not Vercel + Supabase (yet)
+Long-running Node + vault app. Use a Docker-capable host (not serverless).
 
-This app is a **long-running Node server** with a private **vault filesystem**, pending uploads, reactions, and in-memory admin sessions.
-
-- **Vercel** = serverless / edge. It cannot keep the vault, pending queue, or Node `http` server as written.
-- **Supabase** would need a full storage/DB rewrite (Storage buckets + Postgres catalog).
-
-For free + secure **without rewriting the app**, we deploy to **Render** (Docker web service, HTTPS, GitHub auto-deploy).
-
-> Free Render notes: service sleeps after ~15 min idle; filesystem is ephemeral (seed vault is baked into the image; accepted uploads reset on redeploy/sleep until you add a paid disk later).
-
-## 1. Push is already on GitHub
-
-Repo: `https://github.com/Total121/LookBack`
-
-## 2. Create the Render service
-
-1. Open https://dashboard.render.com
-2. Sign in with **GitHub** (Total121)
-3. **New** → **Blueprint**
-4. Select repo **Total121/LookBack**
-5. Apply `render.yaml` (service name `lookback`)
-
-Or **New** → **Web Service** → Docker → same repo, Dockerfile at repo root.
-
-## 3. Environment variables (you fill these)
-
-Set these in Render → Service → Environment (do **not** commit them):
+## Environment (set in the host dashboard — never commit)
 
 | Key | Required | Notes |
 |---|---|---|
-| `ADMIN_USERNAME` | yes | Admin login for `/alb` |
+| `ADMIN_PATH` | recommended | Obscure path for admin UI (e.g. `/x7k9m2qp`) |
+| `ADMIN_USERNAME` | yes | Admin login |
 | `ADMIN_PASSWORD` | yes | ≥12 chars, not a placeholder |
-| `SESSION_SECRET` | yes | Blueprint can auto-generate; or 64+ hex chars |
-| `TURNSTILE_SITE_KEY` | yes (prod) | From Cloudflare Turnstile |
-| `TURNSTILE_SECRET_KEY` | yes (prod) | From Cloudflare Turnstile |
+| `SESSION_SECRET` | yes | ≥32 random chars |
+| `TURNSTILE_SITE_KEY` | yes (prod) | Cloudflare Turnstile |
+| `TURNSTILE_SECRET_KEY` | yes (prod) | Cloudflare Turnstile |
 | `REQUIRE_TURNSTILE` | yes | Must be `true` in production |
-| `HOST` | set by blueprint | `0.0.0.0` |
-| `TRUST_PROXY` | set by blueprint | `true` |
-| `COOKIE_SECURE` | set by blueprint | `auto` |
-| `CLOUD` | set by blueprint | `true` |
+| `HOST` | yes on cloud | `0.0.0.0` |
+| `TRUST_PROXY` | yes on cloud | `true` behind reverse proxy |
+| `COOKIE_SECURE` | yes | `auto` |
+| `CLOUD` | yes on cloud | `true` |
 
-Turnstile: https://dash.cloudflare.com/ → Turnstile → add your `*.onrender.com` host.
+## Blueprint
 
-## 4. Live service (already created)
+`render.yaml` at repo root defines a Docker web service. Connect the repo in your host dashboard and apply the blueprint, or create a Web Service from the Dockerfile.
 
-- Public site: **https://lookback-x8jo.onrender.com**
-- Admin: **https://lookback-x8jo.onrender.com/alb** (not linked from the site)
-- Dashboard: https://dashboard.render.com/web/srv-dbthfeui0phs73f2bs50
+Add your Turnstile host for the public domain you assign.
 
-First boot after idle sleep can take ~30–60s.
-
-### Replace bootstrap secrets
-
-The first deploy used temporary admin credentials + Cloudflare Turnstile **test** keys (`1x0000…`) so the box could boot. In Render → Environment, replace:
-
-1. `ADMIN_USERNAME` / `ADMIN_PASSWORD` with yours  
-2. `SESSION_SECRET` with a fresh long random secret  
-3. `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` with your real Cloudflare Turnstile keys (add host `lookback-x8jo.onrender.com`)  
-
-Then **Manual Deploy → Clear build cache & deploy**.
-
-## 5. Local Docker check (optional)
+## Local Docker check (optional)
 
 ```bash
-docker build -t lookback .
-docker run --rm -p 3947:3947 --env-file web/.env -e HOST=0.0.0.0 -e CLOUD=true lookback
+docker build -t app .
+docker run --rm -p 3947:3947 --env-file web/.env -e HOST=0.0.0.0 -e CLOUD=true app
 ```
+
+## Notes
+
+- Free tiers often sleep after idle; cold start can take 30–60s.
+- Ephemeral filesystem: seed vault is in the image; accepted uploads reset on redeploy unless you attach persistent disk.
+- Do not publish admin path, credentials, or service IDs in public docs.

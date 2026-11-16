@@ -23,12 +23,25 @@ import { mountUploadButton } from './upload'
 import { installGuards } from './guard'
 import { enableTileDrag, resetDragLayer } from './drag'
 import { loadBoot, bootFaces, bootSfx } from './boot'
+import { cloakUrl, releaseCloak, clearCloakCache } from './cloak'
 
 const root = document.querySelector<HTMLDivElement>('#app')!
-const MAX_STRIPS = 5
 const MAX_PLAYING_VIDEOS = 2
 const TILES_PER_STRIP = 14
-const SPACER_CAP_VH = 8
+
+type TileSpec = {
+  kind: 'photo' | 'video' | 'case' | 'ask' | 'photo-xl'
+  left: number
+  top: number
+  w: number
+  h: number
+  rot: number
+  z: number
+  photo?: PhotoStory
+  video?: FeedVid
+  caseIdx?: number
+  filter?: boolean
+}
 
 const photoPool = new MediaPool<PhotoStory>()
 const videoPool = new MediaPool<FeedVid>()
@@ -37,14 +50,15 @@ let caseI = 0
 let stripN = 0
 let webcamAsked = false
 let chaosEl: HTMLElement | null = null
-let spacerEl: HTMLElement | null = null
-let removedHeight = 0
 let lastScrollScare = 0
 let lastScrollCheck = 0
 let appending = false
 let playingVideos = new Set<HTMLVideoElement>()
 let sentinelObserver: IntersectionObserver | null = null
+let stripObserver: IntersectionObserver | null = null
 let casesPromise: Promise<MurderFile[]> | null = null
+const stripSpecs = new WeakMap<HTMLElement, TileSpec[]>()
+const stripMounted = new WeakSet<HTMLElement>()
 
 function pick<T>(arr: T[]) {
   return arr[Math.floor(Math.random() * arr.length)]
@@ -95,23 +109,28 @@ function openMediaStory(opts: {
   if (opts.kind === 'video') {
     const vid = document.createElement('video')
     vid.className = 'hero'
-    vid.src = opts.src
     vid.controls = true
     vid.playsInline = true
     vid.loop = true
     vid.autoplay = true
     vid.muted = false
-    media = vid
-    void vid.play().catch(() => {
-      vid.muted = true
-      void vid.play().catch(() => {})
+    vid.dataset.mediaSrc = opts.src
+    void cloakUrl(opts.src).then((url) => {
+      if (!vid.isConnected) {
+        releaseCloak(opts.src)
+        return
+      }
+      vid.src = url
+      void vid.play().catch(() => {
+        vid.muted = true
+        void vid.play().catch(() => {})
+      })
     })
+    media = vid
   } else {
     const img = document.createElement('img')
     img.className = 'hero'
-    img.src = opts.src
-    img.alt = ''
-    img.decoding = 'async'
+    applyCloakedImg(img, opts.src)
     media = img
   }
 
@@ -198,14 +217,24 @@ function behindOverlay() {
   setTimeout(() => el.remove(), 1400)
 }
 
-function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, src: string) {
+function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, logicalSrc: string) {
   const io = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
         if (e.isIntersecting) {
           if (!vid.getAttribute('src')) {
-            vid.setAttribute('src', src)
-            vid.load()
+            void cloakUrl(logicalSrc).then((url) => {
+              if (!vid.isConnected) {
+                releaseCloak(logicalSrc)
+                return
+              }
+              vid.dataset.mediaSrc = logicalSrc
+              vid.setAttribute('src', url)
+              vid.load()
+              void vid.play().catch(() => {})
+            })
+          } else {
+            void vid.play().catch(() => {})
           }
           if (playingVideos.size >= MAX_PLAYING_VIDEOS) {
             const first = playingVideos.values().next().value
@@ -214,19 +243,19 @@ function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, src: string) {
               playingVideos.delete(first)
             }
           }
-          void vid.play().catch(() => {})
           playingVideos.add(vid)
         } else {
           vid.pause()
           playingVideos.delete(vid)
-          // drop decoded frames when far off-screen
           if (e.intersectionRatio === 0 && e.boundingClientRect.bottom < -400) {
+            const src = vid.dataset.mediaSrc || logicalSrc
             vid.removeAttribute('src')
             try {
               vid.load()
             } catch {
               /* ignore */
             }
+            if (src) releaseCloak(src)
           }
         }
       }
@@ -239,10 +268,12 @@ function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, src: string) {
   ;(strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos = bag
 }
 
-function destroyStrip(strip: HTMLElement) {
+function teardownStripMedia(strip: HTMLElement) {
   strip.querySelectorAll('video').forEach((v) => {
     v.pause()
     playingVideos.delete(v)
+    const src = v.dataset.mediaSrc || v.getAttribute('src') || ''
+    if (src) releaseCloak(src)
     v.removeAttribute('src')
     try {
       v.load()
@@ -250,43 +281,36 @@ function destroyStrip(strip: HTMLElement) {
       /* ignore */
     }
   })
+  strip.querySelectorAll('img').forEach((img) => {
+    const src = img.dataset.mediaSrc || ''
+    if (src) releaseCloak(src)
+  })
   const bag = (strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos
   bag?.forEach((o) => o.disconnect())
-  strip.remove()
+  ;(strip as HTMLElement & { _vos?: IntersectionObserver[] })._vos = []
 }
 
-/**
- * Recycle strips fully above the viewport.
- * Spacer preserves scroll position, capped so document height cannot grow forever.
- */
-function recycleStrips() {
-  if (!chaosEl || !spacerEl) return
-  const strips = [...chaosEl.querySelectorAll<HTMLElement>('.chaos-strip')]
-  if (strips.length <= MAX_STRIPS) return
+/** Unmount tile DOM but keep the strip shell so scroll-up can remount. */
+function unmountStrip(strip: HTMLElement) {
+  if (!stripMounted.has(strip)) return
+  teardownStripMedia(strip)
+  strip.replaceChildren()
+  stripMounted.delete(strip)
+}
 
-  const keepFromBottom = MAX_STRIPS
-  const removable = strips.slice(0, Math.max(0, strips.length - keepFromBottom))
-  const spacerCap = window.innerHeight * SPACER_CAP_VH
-
-  for (const strip of removable) {
-    const rect = strip.getBoundingClientRect()
-    if (rect.bottom > -160) break
-    const h = strip.offsetHeight || rect.height || window.innerHeight
-    if (removedHeight + h <= spacerCap) {
-      removedHeight += h
-      spacerEl.style.height = removedHeight + 'px'
-    } else {
-      // collapse excess: drop height and jump scroll by the same amount
-      const overflow = removedHeight + h - spacerCap
-      const prev = window.scrollY
-      removedHeight = spacerCap
-      spacerEl.style.height = removedHeight + 'px'
-      destroyStrip(strip)
-      window.scrollTo(0, Math.max(0, prev - overflow))
-      continue
-    }
-    destroyStrip(strip)
-  }
+function ensureStripObserver() {
+  if (stripObserver) return
+  stripObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        const strip = e.target as HTMLElement
+        if (!strip.classList.contains('chaos-strip')) continue
+        if (e.isIntersecting) mountStrip(strip)
+        else unmountStrip(strip)
+      }
+    },
+    { root: null, rootMargin: '140% 0px', threshold: 0 },
+  )
 }
 
 function pickKind(): 'photo' | 'video' | 'case' | 'ask' {
@@ -298,14 +322,10 @@ function pickKind(): 'photo' | 'video' | 'case' | 'ask' {
   return 'photo'
 }
 
-function layoutStrip(strip: HTMLElement, count: number) {
-  const frag = document.createDocumentFragment()
+function buildTileSpecs(count: number): TileSpec[] {
+  const specs: TileSpec[] = []
   for (let i = 0; i < count; i++) {
     const kind = pickKind()
-
-    const tile = document.createElement('div')
-    tile.className = 'tile'
-
     const sizeRoll = Math.random()
     let w: number
     let h: number
@@ -327,30 +347,93 @@ function layoutStrip(strip: HTMLElement, count: number) {
       w = 18 + Math.random() * 10
       h = 16 + Math.random() * 10
     }
-
     const left = Math.random() * Math.max(1, 100 - w - 1)
     const top = Math.random() * Math.max(1, 100 - h - 1)
     const rot = (Math.random() - 0.5) * 12
-    tile.style.cssText = `left:${left}%;top:${top}%;width:${w}%;height:${h}%;z-index:${1 + ((Math.random() * 5) | 0)};--r:${rot}deg;transform:rotate(${rot}deg)`
-
+    const z = 1 + ((Math.random() * 5) | 0)
     if (kind === 'photo') {
       const p = photoPool.next()
       if (!p) continue
+      specs.push({
+        kind: 'photo',
+        left,
+        top,
+        w,
+        h,
+        rot,
+        z,
+        photo: p,
+        filter: Math.random() < 0.3,
+      })
+    } else if (kind === 'video') {
+      const v = videoPool.next()
+      if (!v) continue
+      specs.push({ kind: 'video', left, top, w, h, rot, z, video: v })
+    } else if (kind === 'case') {
+      const idx = caseI++
+      specs.push({ kind: 'case', left, top, w, h, rot, z, caseIdx: idx })
+    } else {
+      specs.push({ kind: 'ask', left, top, w, h, rot, z })
+    }
+  }
+  for (let i = 0; i < 2; i++) {
+    const p = photoPool.next()
+    if (!p) break
+    const w = 26 + Math.random() * 16
+    const h = 24 + Math.random() * 16
+    const rot = (Math.random() - 0.5) * 8
+    specs.push({
+      kind: 'photo-xl',
+      left: Math.random() * Math.max(1, 100 - w),
+      top: Math.random() * Math.max(1, 100 - h),
+      w,
+      h,
+      rot,
+      z: 4 + i,
+      photo: p,
+    })
+  }
+  return specs
+}
+
+function applyCloakedImg(img: HTMLImageElement, src: string) {
+  img.dataset.mediaSrc = src
+  img.alt = ''
+  img.decoding = 'async'
+  void cloakUrl(src).then((url) => {
+    if (!img.isConnected) {
+      releaseCloak(src)
+      return
+    }
+    img.src = url
+  })
+}
+
+function mountStrip(strip: HTMLElement) {
+  if (stripMounted.has(strip)) return
+  const specs = stripSpecs.get(strip)
+  if (!specs) return
+  stripMounted.add(strip)
+  const frag = document.createDocumentFragment()
+
+  for (const spec of specs) {
+    const tile = document.createElement('div')
+    tile.className = 'tile'
+    tile.style.cssText = `left:${spec.left}%;top:${spec.top}%;width:${spec.w}%;height:${spec.h}%;z-index:${spec.z};--r:${spec.rot}deg;transform:rotate(${spec.rot}deg)`
+
+    if (spec.kind === 'photo' || spec.kind === 'photo-xl') {
+      const p = spec.photo!
       const img = document.createElement('img')
-      img.src = p.src
-      img.alt = ''
-      img.loading = 'lazy'
-      img.decoding = 'async'
-      if (Math.random() < 0.3) img.style.filter = 'contrast(1.55) grayscale(.8) brightness(.7)'
+      if (spec.filter) img.style.filter = 'contrast(1.55) grayscale(.8) brightness(.7)'
+      applyCloakedImg(img, p.src)
       const cap = document.createElement('div')
       cap.className = 'cap'
       cap.textContent = p.title
       tile.append(img, cap)
       tile.addEventListener('click', () => openPhotoStory(p), { passive: true })
       enableTileDrag(tile)
-    } else if (kind === 'video') {
-      const v = videoPool.next()
-      if (!v) continue
+    } else if (spec.kind === 'video') {
+      const v = spec.video!
       tile.classList.add('video-tile')
       const vid = document.createElement('video')
       vid.playsInline = true
@@ -375,12 +458,11 @@ function layoutStrip(strip: HTMLElement, count: number) {
           }
         },
       })
-    } else if (kind === 'case') {
+    } else if (spec.kind === 'case') {
       tile.classList.add('case-tile')
       void ensureCases().then(() => {
         if (!CASES.length || !tile.isConnected) return
-        const m = CASES[caseI % CASES.length]
-        caseI++
+        const m = CASES[(spec.caseIdx ?? 0) % CASES.length]
         tile.replaceChildren()
         const h4 = document.createElement('h4')
         h4.textContent = m.title
@@ -397,10 +479,10 @@ function layoutStrip(strip: HTMLElement, count: number) {
       const t = document.createElement('div')
       t.className = 'gothic'
       t.style.cssText = 'color:#f33;font-size:16px'
-      t.textContent = '𝖈𝖆𝖓 𝖎 𝖘𝖊𝖊 𝖞𝖔𝖚'
+      t.textContent = 'Can I see you?'
       const b = document.createElement('button')
       b.type = 'button'
-      b.textContent = 'yes — camera'
+      b.textContent = 'Yes'
       b.addEventListener('click', async (e) => {
         e.stopPropagation()
         webcamAsked = true
@@ -410,30 +492,17 @@ function layoutStrip(strip: HTMLElement, count: number) {
     }
     frag.appendChild(tile)
   }
-
-  for (let i = 0; i < 2; i++) {
-    const p = photoPool.next()
-    if (!p) break
-    const tile = document.createElement('div')
-    tile.className = 'tile'
-    const w = 26 + Math.random() * 16
-    const h = 24 + Math.random() * 16
-    const rot = (Math.random() - 0.5) * 8
-    tile.style.cssText = `left:${Math.random() * (100 - w)}%;top:${Math.random() * (100 - h)}%;width:${w}%;height:${h}%;z-index:${4 + i};--r:${rot}deg;transform:rotate(${rot}deg)`
-    const img = document.createElement('img')
-    img.src = p.src
-    img.alt = ''
-    img.loading = 'lazy'
-    img.decoding = 'async'
-    const cap = document.createElement('div')
-    cap.className = 'cap'
-    cap.textContent = p.title
-    tile.append(img, cap)
-    tile.addEventListener('click', () => openPhotoStory(p), { passive: true })
-    enableTileDrag(tile)
-    frag.appendChild(tile)
-  }
   strip.appendChild(frag)
+}
+
+function layoutStrip(strip: HTMLElement, count: number) {
+  const specs = buildTileSpecs(count)
+  stripSpecs.set(strip, specs)
+  // Reserve height so unmounted strips don't collapse the scroll.
+  if (!strip.style.minHeight) strip.style.minHeight = '100vh'
+  ensureStripObserver()
+  stripObserver!.observe(strip)
+  mountStrip(strip)
 }
 
 function placeSentinel() {
@@ -464,7 +533,6 @@ function appendStrips(n = 1) {
       else chaosEl.appendChild(strip)
       layoutStrip(strip, TILES_PER_STRIP)
     }
-    recycleStrips()
     placeSentinel()
 
     if (stripN === 4 && Math.random() > 0.7) setTimeout(() => behindOverlay(), 1000)
@@ -495,7 +563,6 @@ function onScrollRare() {
   const now = Date.now()
   if (now - lastScrollCheck < 250) return
   lastScrollCheck = now
-  if (!appending) recycleStrips()
   onDreadScroll()
   const intensity = dreadIntensity()
   const scareCooldown = Math.max(14000, 52000 - intensity * 38000)
@@ -598,13 +665,15 @@ function showLoadingThenFeed(photos: PhotoStory[], videos: FeedVid[]) {
 
 function renderFeed(photos: PhotoStory[], videos: FeedVid[]) {
   closeWebcam()
+  clearCloakCache()
   photoPool.reset(photos)
   videoPool.reset(videos)
-  removedHeight = 0
   stripN = 0
   appending = false
   playingVideos.clear()
   sentinelObserver?.disconnect()
+  stripObserver?.disconnect()
+  stripObserver = null
   resetDragLayer()
 
   root.replaceChildren()
@@ -624,16 +693,11 @@ function renderFeed(photos: PhotoStory[], videos: FeedVid[]) {
   const chaos = document.createElement('div')
   chaos.className = 'chaos'
   chaos.id = 'chaos'
-  const spacer = document.createElement('div')
-  spacer.className = 'chaos-spacer'
-  spacer.id = 'spacer'
-  chaos.appendChild(spacer)
   feed.append(top, chaos)
   root.appendChild(feed)
 
   ensureChrome()
   chaosEl = chaos
-  spacerEl = spacer
   appendStrips(2)
   window.removeEventListener('scroll', onScrollRare)
   window.addEventListener('scroll', onScrollRare, { passive: true })

@@ -107,8 +107,9 @@ export function createAppHandler({ isProd = false } = {}) {
       }
 
       setSecurityHeaders(res, { req })
+      const adminBase = config.adminPath
       // Public CSP as HTTP header (meta alone cannot set frame-ancestors)
-      if (!pathname.startsWith('/alb') && !pathname.startsWith('/api/admin')) {
+      if (!pathname.startsWith(adminBase) && !pathname.startsWith('/api/admin')) {
         res.setHeader(
           'Content-Security-Policy',
           [
@@ -119,10 +120,13 @@ export function createAppHandler({ isProd = false } = {}) {
             "media-src 'self' blob:",
             "connect-src 'self' https://challenges.cloudflare.com",
             "frame-src https://challenges.cloudflare.com",
+            "font-src 'self'",
+            "worker-src 'none'",
             "object-src 'none'",
-            "base-uri 'self'",
+            "base-uri 'none'",
             "form-action 'self'",
             "frame-ancestors 'none'",
+            "upgrade-insecure-requests",
           ].join('; '),
         )
       }

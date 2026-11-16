@@ -39,12 +39,24 @@ const isCloud =
   Boolean(process.env.RENDER || process.env.RAILWAY_ENVIRONMENT || process.env.FLY_APP_NAME) ||
   req('CLOUD', 'false') === 'true'
 
+function sanitizeAdminPath(raw) {
+  let p = String(raw || '/alb').trim()
+  if (!p.startsWith('/')) p = '/' + p
+  p = p.replace(/\/+/g, '/').replace(/\/$/, '') || '/alb'
+  // Only opaque path segments — no traversal, no reserved public routes
+  if (!/^\/[a-zA-Z0-9_-]{3,64}$/.test(p)) return '/alb'
+  const reserved = new Set(['/api', '/m', '/media', '/video', '/sfx', '/assets', '/src'])
+  if (reserved.has(p)) return '/alb'
+  return p
+}
+
 export const config = {
   // Cloud hosts must bind all interfaces; local defaults to loopback
   host: req('HOST', isCloud ? '0.0.0.0' : '127.0.0.1'),
   port: Number(req('PORT', '3947')),
-  // Trust proxy hop on managed hosts (Render / Railway / Fly / Cloudflare)
+  // Trust proxy hop on managed hosts (edge reverse proxy)
   trustProxy: req('TRUST_PROXY', isCloud ? 'true' : 'false') === 'true',
+  adminPath: sanitizeAdminPath(req('ADMIN_PATH', '/alb')),
   adminUsername: req('ADMIN_USERNAME', ''),
   adminPassword: req('ADMIN_PASSWORD', ''),
   sessionSecret: req('SESSION_SECRET', ''),

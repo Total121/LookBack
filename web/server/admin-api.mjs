@@ -646,10 +646,11 @@ export async function handleAdminApi(req, res) {
   return true
 }
 
-/** Serve /alb admin UI (obscured path). Never linked from public site. */
+/** Serve admin UI at config.adminPath. Never linked from public site. */
 export function handleAdminUi(req, res) {
   const url = (req.url || '').split('?')[0]
-  if (url !== '/alb' && !url.startsWith('/alb/')) return false
+  const base = config.adminPath
+  if (url !== base && !url.startsWith(base + '/')) return false
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.statusCode = 405
@@ -660,7 +661,7 @@ export function handleAdminUi(req, res) {
   setSecurityHeaders(res, { admin: true, req })
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private')
 
-  let rel = url === '/alb' || url === '/alb/' ? '/index.html' : url.slice('/alb'.length)
+  let rel = url === base || url === base + '/' ? '/index.html' : url.slice(base.length)
   if (rel.includes('..')) {
     res.statusCode = 400
     res.end('bad path')
@@ -684,7 +685,7 @@ export function handleAdminUi(req, res) {
   }
 
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    // SPA-ish: always index for unknown /alb routes
+    // SPA-ish: always index for unknown admin routes
     const index = path.join(config.adminUiDir, 'index.html')
     if (fs.existsSync(index)) {
       res.statusCode = 200
