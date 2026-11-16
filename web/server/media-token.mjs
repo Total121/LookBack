@@ -175,7 +175,11 @@ export function sendVaultFile(req, res, absPath, { downloadName = null } = {}) {
   res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=60')
   res.setHeader('ETag', etag)
   res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('Content-Disposition', downloadName ? `inline; filename="${downloadName}"` : 'inline')
+  // Never leak vault filenames in Content-Disposition
+  res.setHeader(
+    'Content-Disposition',
+    downloadName ? `inline; filename="${downloadName}"` : 'inline; filename="m"',
+  )
   res.setHeader('Vary', 'Sec-Fetch-Dest')
   // Block naive hotlink / open-as-document when possible
   const dest = String(req.headers['sec-fetch-dest'] || '')
@@ -302,6 +306,30 @@ function opaqueId(src) {
     .slice(0, 22)
 }
 
+function looksLikeFilename(t) {
+  const s = String(t || '').trim()
+  if (!s) return true
+  if (/\.(jpe?g|png|gif|webp|webm|mp4|mov|wav|mp3)$/i.test(s)) return true
+  if (/^(x_|js-|img_|vid_|dsc|img|file)[a-z0-9_-]*$/i.test(s)) return true
+  if (/^[a-f0-9]{8,}$/i.test(s)) return true
+  return false
+}
+
+function publicTitle(raw, kind) {
+  const t = String(raw || '').trim()
+  if (looksLikeFilename(t)) return kind === 'video' ? 'TAPE' : 'STILL'
+  // Cap length — avoid leaking long path-like strings
+  return t.slice(0, 64)
+}
+
+function shuffleRows(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+
 function libraryPayload() {
   const catalog = syncCatalogFromDisk()
   const photos = []
@@ -310,18 +338,25 @@ function libraryPayload() {
     if (item.hidden || item.missing) continue
     const abs = vaultAbs(src)
     if (!abs || !fs.existsSync(abs)) continue
+    const isVid = item.kind === 'video' || src.startsWith('/video/')
     const row = {
       id: opaqueId(src),
       url: tokenUrl(src),
-      title: item.title || '',
-      rating: item.rating || '',
-      story: item.description || '',
+      title: publicTitle(item.title || item.label || '', isVid ? 'video' : 'photo'),
+      rating: String(item.rating || (isVid ? 'R — tape' : 'R — archive')).slice(0, 48),
+      story: String(item.description || '').slice(0, 2000),
       featured: Boolean(item.featured || item.source === 'accepted'),
     }
-    if (item.kind === 'video' || src.startsWith('/video/')) videos.push(row)
+    if (isVid) videos.push(row)
     else photos.push(row)
   }
-  return { photos, videos, updatedAt: catalog.updatedAt }
+  // Shuffle so catalog/disk enumeration order is not fingerprintable
+  shuffleRows(photos)
+  shuffleRows(videos)
+  // Featured still float early without exposing source field
+  photos.sort((a, b) => Number(b.featured) - Number(a.featured))
+  videos.sort((a, b) => Number(b.featured) - Number(a.featured))
+  return { photos, videos }
 }
 
 function bootPayload() {
@@ -340,7 +375,6 @@ function bootPayload() {
     faces,
     sfx: collectSfxTokens(),
     flags: publicSiteFlags(),
-    issuedAt: Date.now(),
     ttlMs: TOKEN_TTL_MS,
   }
 }
@@ -390,6 +424,8 @@ export async function handleMediaApi(req, res) {
       sendJson(res, 403, { ok: false, error: 'forbidden' })
       return true
     }
+    // Tiny jitter — frustrates timing fingerprinting of catalog size
+    await new Promise((r) => setTimeout(r, 15 + Math.floor(Math.random() * 40)))
     const data = libraryPayload()
     sendJson(res, 200, { ok: true, ...data })
     return true

@@ -58,6 +58,8 @@ export function bindOpaqueImg(
         if (!img.isConnected || url === src) return
         img.dataset.cloaked = '1'
         img.src = url
+        // Drop token from DOM attributes after cloak
+        delete img.dataset.mediaSrc
       })
     }
     if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2500 })

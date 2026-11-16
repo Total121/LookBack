@@ -1,48 +1,85 @@
 /**
- * Infinite media pool.
- * Walks every asset once (shuffled), then reshuffles and starts again —
- * more items = longer before a full loop; never dead-ends the scroll.
+ * Deck pool — each asset appears at most MAX_SHOWS times per cycle.
+ * Layered deal: every item is shown once before any gets a second show.
+ * After all hit MAX_SHOWS, counts reset and the deck reshuffles (start over).
+ * Scroll-up remounts use stored strip specs and do not re-draw from the pool.
  */
+
+const MAX_SHOWS = 2
 
 export class MediaPool<T extends { src: string; featured?: boolean }> {
   private items: T[] = []
-  private order: T[] = []
-  private cursor = 0
-  private laps = 0
+  private bySrc = new Map<string, T>()
+  private shows = new Map<string, number>()
+  private queue: string[] = []
+  private layer = 0
+  private cycles = 0
 
   reset(items: T[]) {
     this.items = items.slice()
-    this.laps = 0
-    this.buildOrder()
+    this.bySrc = new Map(items.map((i) => [i.src, i]))
+    this.shows = new Map(items.map((i) => [i.src, 0]))
+    this.layer = 0
+    this.cycles = 0
+    this.refillQueue()
   }
 
-  private buildOrder() {
-    const featured = this.items.filter((i) => i.featured)
-    const rest = this.items.filter((i) => !i.featured)
-    shuffleInPlace(featured)
-    shuffleInPlace(rest)
-
-    // First lap: accepted/community first so new uploads show up while scrolling,
-    // then the rest. Later laps fully reshuffle everything together.
-    if (this.laps === 0 && featured.length) {
-      this.order = featured.concat(rest)
-    } else {
-      this.order = featured.concat(rest)
-      shuffleInPlace(this.order)
+  /** Build queue of srcs that still need a show at the current layer (0 then 1). */
+  private refillQueue() {
+    if (!this.items.length) {
+      this.queue = []
+      return
     }
-    this.cursor = 0
+
+    // If everyone already hit MAX_SHOWS, start a fresh cycle
+    const allDone = this.items.every((i) => (this.shows.get(i.src) || 0) >= MAX_SHOWS)
+    if (allDone) {
+      for (const i of this.items) this.shows.set(i.src, 0)
+      this.layer = 0
+      this.cycles++
+    }
+
+    // Prefer filling lower layers first (unique pass, then optional 2nd pass)
+    while (this.layer < MAX_SHOWS) {
+      const need = this.items
+        .filter((i) => (this.shows.get(i.src) || 0) === this.layer)
+        .map((i) => i.src)
+      if (need.length) {
+        // First cycle: featured first on layer 0 only
+        if (this.cycles === 0 && this.layer === 0) {
+          const featured = need.filter((s) => this.bySrc.get(s)?.featured)
+          const rest = need.filter((s) => !this.bySrc.get(s)?.featured)
+          shuffleInPlace(featured)
+          shuffleInPlace(rest)
+          this.queue = featured.concat(rest)
+        } else {
+          shuffleInPlace(need)
+          this.queue = need
+        }
+        return
+      }
+      this.layer++
+    }
+
+    // Fallback — should have reset above; rebuild once
+    for (const i of this.items) this.shows.set(i.src, 0)
+    this.layer = 0
+    this.cycles++
+    const all = this.items.map((i) => i.src)
+    shuffleInPlace(all)
+    this.queue = all
   }
 
-  /** Next item forever — when the list ends, begin from the start again. */
+  /** Next item for downward scroll. Never returns an item already at MAX_SHOWS this cycle. */
   next(): T | null {
     if (!this.items.length) return null
-    if (this.cursor >= this.order.length) {
-      this.laps++
-      this.buildOrder()
-    }
-    const item = this.order[this.cursor]
-    this.cursor++
-    return item
+    if (!this.queue.length) this.refillQueue()
+    if (!this.queue.length) return null
+
+    const src = this.queue.shift()!
+    const n = (this.shows.get(src) || 0) + 1
+    this.shows.set(src, n)
+    return this.bySrc.get(src) || null
   }
 
   size() {
@@ -50,7 +87,12 @@ export class MediaPool<T extends { src: string; featured?: boolean }> {
   }
 
   lap() {
-    return this.laps
+    return this.cycles
+  }
+
+  /** How many times this src has been dealt in the current cycle (0–MAX_SHOWS). */
+  shownCount(src: string) {
+    return this.shows.get(src) || 0
   }
 }
 

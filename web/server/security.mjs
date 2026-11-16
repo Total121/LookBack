@@ -209,7 +209,7 @@ export function createSession(user, ip) {
 
 export function destroySession(req) {
   const cookies = parseCookies(req)
-  const raw = cookies['__Host-lb_admin'] || cookies.lb_admin
+  const raw = readSessionRaw(cookies)
   const id = unsign(raw)
   if (id) sessions.delete(id)
 }
@@ -217,7 +217,7 @@ export function destroySession(req) {
 export function getSession(req) {
   pruneSessions()
   const cookies = parseCookies(req)
-  const raw = cookies['__Host-lb_admin'] || cookies.lb_admin
+  const raw = readSessionRaw(cookies)
   const id = unsign(raw)
   if (!id) return null
   const s = sessions.get(id)
@@ -229,9 +229,30 @@ export function getSession(req) {
   return { id, ...s }
 }
 
+function cookieTag() {
+  // Stable anonymous cookie name derived from secret — no product brand in DevTools
+  return createHmac('sha256', config.sessionSecret || 'x')
+    .update('cookie-tag-v1')
+    .digest('base64url')
+    .slice(0, 8)
+}
+
 function cookieName(secure) {
+  const tag = cookieTag()
   // __Host- requires Secure + Path=/ + no Domain — stronger against subdomain theft
-  return secure ? '__Host-lb_admin' : 'lb_admin'
+  return secure ? `__Host-${tag}` : tag
+}
+
+function readSessionRaw(cookies) {
+  const tag = cookieTag()
+  return (
+    cookies[`__Host-${tag}`] ||
+    cookies[tag] ||
+    // legacy names (migrate silently)
+    cookies['__Host-lb_admin'] ||
+    cookies.lb_admin ||
+    ''
+  )
 }
 
 export function setSessionCookie(res, req, sessionId) {
@@ -250,17 +271,18 @@ export function setSessionCookie(res, req, sessionId) {
 
 export function clearSessionCookie(res, req) {
   const secure = cookieSecureFrom(req)
-  const plain = ['lb_admin=', 'Path=/', 'HttpOnly', 'SameSite=Strict', 'Max-Age=0']
-  if (secure) plain.push('Secure')
-  const host = [
-    '__Host-lb_admin=',
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Strict',
-    'Max-Age=0',
-    'Secure',
-  ]
-  res.setHeader('Set-Cookie', [plain.join('; '), host.join('; ')])
+  const tag = cookieTag()
+  const expire = (name, withSecure) => {
+    const parts = [`${name}=`, 'Path=/', 'HttpOnly', 'SameSite=Strict', 'Max-Age=0']
+    if (withSecure) parts.push('Secure')
+    return parts.join('; ')
+  }
+  res.setHeader('Set-Cookie', [
+    expire(tag, secure),
+    expire(`__Host-${tag}`, true),
+    expire('lb_admin', secure),
+    expire('__Host-lb_admin', true),
+  ])
   res.setHeader('Clear-Site-Data', '"cookies", "storage"')
 }
 
