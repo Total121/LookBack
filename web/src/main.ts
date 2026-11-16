@@ -24,10 +24,14 @@ import { installGuards } from './guard'
 import { enableTileDrag, resetDragLayer } from './drag'
 import { loadBoot, bootFaces, bootSfx } from './boot'
 import { bindOpaqueImg, clearCloakCache } from './cloak'
+import { deviceProfile } from './device'
 
 const root = document.querySelector<HTMLDivElement>('#app')!
-const MAX_PLAYING_VIDEOS = 2
 const TILES_PER_STRIP = 14
+
+function maxPlayingVideos() {
+  return deviceProfile().maxVideos
+}
 
 type TileSpec = {
   kind: 'photo' | 'video' | 'case' | 'ask' | 'photo-xl'
@@ -125,7 +129,11 @@ function openMediaStory(opts: {
   } else {
     const img = document.createElement('img')
     img.className = 'hero'
-    bindOpaqueImg(img, opts.src, { lazy: false, priority: 'high' })
+    bindOpaqueImg(img, opts.src, {
+      lazy: false,
+      priority: 'high',
+      cloak: deviceProfile().cloakFeed,
+    })
     media = img
   }
 
@@ -223,7 +231,7 @@ function trackVideo(strip: HTMLElement, vid: HTMLVideoElement, logicalSrc: strin
             vid.src = logicalSrc
             vid.load()
           }
-          if (playingVideos.size >= MAX_PLAYING_VIDEOS) {
+          if (playingVideos.size >= maxPlayingVideos()) {
             const first = playingVideos.values().next().value
             if (first && first !== vid) {
               first.pause()
@@ -402,9 +410,10 @@ function mountStrip(strip: HTMLElement) {
       if (spec.filter) img.style.filter = 'contrast(1.55) grayscale(.8) brightness(.7)'
       const eager = photoI < 6
       photoI++
-      bindOpaqueImg(img, p.src, {
+      bindOpaqueImg(img, p.thumbSrc || p.src, {
         lazy: !eager,
         priority: eager ? 'high' : 'auto',
+        cloak: deviceProfile().cloakFeed,
       })
       const cap = document.createElement('div')
       cap.className = 'cap'

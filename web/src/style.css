@@ -629,6 +629,27 @@ html.dread-glitch-hard body {
 }
 body.dread-ending, html.dread-ending { overflow: hidden !important; }
 
+/* Soft dread (phones / reduced-motion): same vignette, cheaper corruption */
+html.dread-glitch-hard body.dread-soft {
+  filter: none !important;
+}
+body.dread-soft .dread-layer {
+  mix-blend-mode: normal;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(40,0,0, calc(var(--dread, 0) * .38)) 100%);
+}
+body.dread-soft .tile img,
+body.dread-soft .tile video {
+  filter: contrast(1.2) saturate(.55) grayscale(.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: none; }
+  .dread-shake, .shake-hard, html.dread-glitch body, html.dread-glitch-hard body {
+    animation: none !important;
+  }
+}
+
 @media (max-width: 700px) {
-  .chaos-strip { min-height: 160vh; }
+  .chaos-strip { min-height: 140vh; }
+  .tile { box-shadow: 0 0 8px #100; }
 }

@@ -413,6 +413,13 @@ export function acceptPending(meta, filePath, { title, description, rating } = {
   fs.mkdirSync(path.dirname(destAbs), { recursive: true })
   fs.copyFileSync(filePath, destAbs)
 
+  if (!isVideo) {
+    // Fire-and-forget thumb so the next library fetch can use it
+    void import('./thumbs.mjs')
+      .then((m) => m.ensureThumb(destRel, destAbs))
+      .catch(() => {})
+  }
+
   const catalog = syncCatalogFromDisk()
   const desc = sanitizeDescription(description ?? meta.description ?? '', MAX_DESC_CHARS)
   catalog.items[destRel] = {

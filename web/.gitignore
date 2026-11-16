@@ -30,6 +30,9 @@ vault/video/a_*
 vault/media/p_*
 vault/video/p_*
 
+# Generated feed thumbnails (rebuilt on boot)
+vault/media/thumbs/
+
 # Legacy public media must stay empty
 public/media/**
 !public/media/.gitkeep

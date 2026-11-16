@@ -7,7 +7,11 @@ import { setSecurityHeaders, clientIp, apiRateLimit, sendJson, applyAnonHeaders 
 import { syncCatalogFromDisk, migratePublicToVault, rebuildMediaIndexes } from './catalog.mjs'
 import { handlePublicReactions } from './reactions.mjs'
 import { getSettings, isBanned } from './settings.mjs'
-import { handleOpaqueMedia, handleMediaApi } from './media-token.mjs'
+import { handleOpaqueMedia, handleMediaApi, vaultAbs } from './media-token.mjs'
+import { hydrateFromSeed } from './persist.mjs'
+import { ensureAllThumbs } from './thumbs.mjs'
+
+export { vaultAbs, ensureAllThumbs, hydrateFromSeed }
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -88,9 +92,21 @@ function blockDirectAsset(pathname) {
  */
 export function createAppHandler({ isProd = false } = {}) {
   assertSecureConfig(isProd)
+  if (isProd) {
+    try {
+      hydrateFromSeed()
+    } catch (err) {
+      console.warn('[persist] hydrate failed', err?.message || err)
+    }
+  }
   migratePublicToVault()
   syncCatalogFromDisk()
   rebuildMediaIndexes()
+
+  // Background thumbs only in production boot — never during Vite plugin load
+  if (isProd) {
+    void ensureAllThumbs(vaultAbs).catch(() => {})
+  }
 
   const upload = createUploadMiddleware({ pendingDir: config.pendingDir })
 

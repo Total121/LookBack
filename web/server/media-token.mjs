@@ -9,6 +9,7 @@ import { config } from './config.mjs'
 import { clientIp, sendJson, apiRateLimit, applyAnonHeaders } from './security.mjs'
 import { syncCatalogFromDisk } from './catalog.mjs'
 import { getSettings, isBanned, publicSiteFlags } from './settings.mjs'
+import { hasThumb, thumbRelForSrc } from './thumbs.mjs'
 
 const TOKEN_TTL_MS = 20 * 60 * 1000
 const BRUTAL_FACES = [
@@ -118,7 +119,8 @@ export function verifyToken(token) {
 export function assertVaultSrc(src) {
   if (typeof src !== 'string') return false
   if (src.includes('..') || src.includes('\\') || src.includes('\0')) return false
-  if (!/^\/(media|video|sfx)\/[A-Za-z0-9._-]+$/.test(src)) return false
+  // Originals: /media/file.jpg  Thumbs: /media/thumbs/id.webp  Videos/sfx: flat
+  if (!/^\/(media|video|sfx)\/(?:thumbs\/)?[A-Za-z0-9._-]+$/.test(src)) return false
   return true
 }
 
@@ -336,6 +338,8 @@ function libraryPayload() {
   const videos = []
   for (const [src, item] of Object.entries(catalog.items)) {
     if (item.hidden || item.missing) continue
+    // Never list generated thumbs as library items
+    if (src.includes('/thumbs/')) continue
     const abs = vaultAbs(src)
     if (!abs || !fs.existsSync(abs)) continue
     const isVid = item.kind === 'video' || src.startsWith('/video/')
@@ -346,6 +350,11 @@ function libraryPayload() {
       rating: String(item.rating || (isVid ? 'R — tape' : 'R — archive')).slice(0, 48),
       story: String(item.description || '').slice(0, 2000),
       featured: Boolean(item.featured || item.source === 'accepted'),
+    }
+    if (!isVid) {
+      // Prefer prebuilt WebP thumb for collage tiles (same look, far less bytes)
+      const tRel = thumbRelForSrc(src)
+      if (tRel && hasThumb(src)) row.thumbUrl = tokenUrl(tRel)
     }
     if (isVid) videos.push(row)
     else photos.push(row)

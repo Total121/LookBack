@@ -2,6 +2,8 @@
 
 export type PhotoStory = {
   src: string
+  /** Smaller WebP for collage tiles when available; full `src` for tear. */
+  thumbSrc?: string
   title: string
   rating: string
   story: string
@@ -177,6 +179,7 @@ async function fetchJsonFresh<T>(url: string, bust = Date.now()): Promise<T | nu
 type LibraryRow = {
   id?: string
   url: string
+  thumbUrl?: string
   title?: string
   rating?: string
   story?: string
@@ -216,6 +219,7 @@ export async function loadAllPhotos(): Promise<PhotoStory[]> {
       const title = row.title?.trim() || `STILL_${String(i).padStart(2, '0')}`
       return {
         src: row.url,
+        thumbSrc: row.thumbUrl || undefined,
         title,
         rating: row.rating?.trim() || 'R — archive',
         story: row.story?.trim() || `Recovered still · ${title}.`,
@@ -244,7 +248,7 @@ export async function loadAllVideos(): Promise<FeedVid[]> {
   return []
 }
 
-/** Tiny preload for a fast loading screen — only opaque token URLs. */
+/** Tiny preload for a fast loading screen — prefer thumbs when present. */
 export function preloadSubset(photos: PhotoStory[], _videos: FeedVid[]) {
-  return photos.slice(0, 8).map((p) => p.src)
+  return photos.slice(0, 8).map((p) => p.thumbSrc || p.src)
 }

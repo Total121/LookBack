@@ -1,0 +1,49 @@
+# Optional blueprint: paid plan + persistent disk for durable uploads.
+# Free Render plans cannot attach disks — use this when you upgrade.
+# Apply carefully (may recreate/upgrade the service). Prefer editing the
+# live service in the dashboard: add disk at /var/data, set DATA_ROOT.
+
+services:
+  - type: web
+    name: lookback
+    runtime: node
+    plan: starter
+    region: oregon
+    rootDir: web
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/public/config
+    autoDeployTrigger: commit
+    disk:
+      name: lookback-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLOUD
+        value: "true"
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "true"
+      - key: COOKIE_SECURE
+        value: auto
+      - key: REQUIRE_TURNSTILE
+        value: "true"
+      - key: DATA_ROOT
+        value: /var/data
+      - key: SESSION_TTL_HOURS
+        value: "12"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_PATH
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false

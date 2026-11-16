@@ -43,18 +43,40 @@ function sanitizeAdminPath(raw) {
   let p = String(raw || '/alb').trim()
   if (!p.startsWith('/')) p = '/' + p
   p = p.replace(/\/+/g, '/').replace(/\/$/, '') || '/alb'
-  // Only opaque path segments — no traversal, no reserved public routes
   if (!/^\/[a-zA-Z0-9_-]{3,64}$/.test(p)) return '/alb'
   const reserved = new Set(['/api', '/m', '/media', '/video', '/sfx', '/assets', '/src'])
   if (reserved.has(p)) return '/alb'
   return p
 }
 
+function resolveDir(envName, fallback) {
+  const raw = req(envName, '')
+  if (!raw) return fallback
+  return path.resolve(raw)
+}
+
+/** Optional mount root — when set, vault/pending/data live under it unless overridden. */
+const dataRoot = req('DATA_ROOT', '') ? path.resolve(req('DATA_ROOT')) : ''
+
+const seedVaultDir = path.join(ROOT, 'vault')
+const seedDataDir = path.join(ROOT, 'data')
+
+const vaultDir = resolveDir(
+  'VAULT_DIR',
+  dataRoot ? path.join(dataRoot, 'vault') : seedVaultDir,
+)
+const pendingDir = resolveDir(
+  'PENDING_DIR',
+  dataRoot ? path.join(dataRoot, 'pending-uploads') : path.join(ROOT, 'pending-uploads'),
+)
+const dataDir = resolveDir(
+  'DATA_DIR',
+  dataRoot ? path.join(dataRoot, 'data') : seedDataDir,
+)
+
 export const config = {
-  // Cloud hosts must bind all interfaces; local defaults to loopback
   host: req('HOST', isCloud ? '0.0.0.0' : '127.0.0.1'),
   port: Number(req('PORT', '3947')),
-  // Trust proxy hop on managed hosts (edge reverse proxy)
   trustProxy: req('TRUST_PROXY', isCloud ? 'true' : 'false') === 'true',
   adminPath: sanitizeAdminPath(req('ADMIN_PATH', '/alb')),
   adminUsername: req('ADMIN_USERNAME', ''),
@@ -64,19 +86,25 @@ export const config = {
   turnstileSiteKey: req('TURNSTILE_SITE_KEY', ''),
   turnstileSecretKey: req('TURNSTILE_SECRET_KEY', ''),
   requireTurnstile: req('REQUIRE_TURNSTILE', 'true') !== 'false',
-  cookieSecure: req('COOKIE_SECURE', 'auto'), // auto | true | false
+  cookieSecure: req('COOKIE_SECURE', 'auto'),
   publicDir: path.join(ROOT, 'public'),
-  vaultDir: path.join(ROOT, 'vault'),
   distDir: path.join(ROOT, 'dist'),
-  pendingDir: path.join(ROOT, 'pending-uploads'),
-  dataDir: path.join(ROOT, 'data'),
-  catalogPath: path.join(ROOT, 'data', 'catalog.json'),
   adminUiDir: path.join(ROOT, 'server', 'admin-ui'),
+  /** Writable live paths (may be on a persistent disk). */
+  vaultDir,
+  pendingDir,
+  dataDir,
+  catalogPath: path.join(dataDir, 'catalog.json'),
+  /** Image-baked seed (read-only source for hydrate). */
+  seedVaultDir,
+  seedDataDir,
+  dataRoot: dataRoot || '',
 }
 
 fs.mkdirSync(config.pendingDir, { recursive: true })
 fs.mkdirSync(config.dataDir, { recursive: true })
 fs.mkdirSync(path.join(config.vaultDir, 'media'), { recursive: true })
+fs.mkdirSync(path.join(config.vaultDir, 'media', 'thumbs'), { recursive: true })
 fs.mkdirSync(path.join(config.vaultDir, 'video'), { recursive: true })
 fs.mkdirSync(path.join(config.vaultDir, 'sfx'), { recursive: true })
 

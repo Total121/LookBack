@@ -1,14 +1,28 @@
 /**
  * Progressive dread — the longer you stay, the worse it gets.
  * Caps at a 10-hour blackout ending.
+ * Session age persists across refresh (sessionStorage) so the arc feels continuous.
  */
 
-import { jumpscare, maybeAmbientSting, play, playSnippet, CUSTOM_SFX, stopAllHauntAudio } from './audio/haunt'
+import {
+  jumpscare,
+  maybeAmbientSting,
+  play,
+  playSnippet,
+  CUSTOM_SFX,
+  stopAllHauntAudio,
+  startAmbientBed,
+  setAmbientBedVolume,
+  stopAmbientBed,
+  duckAmbientBed,
+} from './audio/haunt'
 import { bootFaces } from './boot'
+import { deviceProfile } from './device'
 
 const HOUR = 60 * 60 * 1000
 const MIN = 60 * 1000
 const ENDING_MS = 10 * HOUR
+const SESSION_KEY = 'lb_dread_t0'
 
 let startedAt = 0
 let timer: number | null = null
@@ -25,6 +39,8 @@ export function setDreadMultiplier(n: number) {
 
 export function setAmbientEnabled(v: boolean) {
   ambientOn = Boolean(v)
+  if (!ambientOn) stopAmbientBed()
+  else if (startedAt && !endingDone) void startAmbientBed(bedVol())
 }
 
 export function sessionAgeMs() {
@@ -40,11 +56,26 @@ export function dreadIntensity() {
 
 function tier(): 0 | 1 | 2 | 3 | 4 {
   const m = sessionAgeMs() / MIN
-  if (m >= 10 * 60) return 4 // 10h
+  if (m >= 10 * 60) return 4
   if (m >= 45) return 3
   if (m >= 10) return 2
   if (m >= 3) return 1
   return 0
+}
+
+function softMode() {
+  const d = deviceProfile()
+  return d.constrained || d.reduceMotion
+}
+
+function tickMs() {
+  return softMode() ? 4200 : 2800
+}
+
+function bedVol() {
+  const intensity = dreadIntensity()
+  const base = softMode() ? 0.028 : 0.042
+  return base + intensity * (softMode() ? 0.02 : 0.035)
 }
 
 function ensureLayer() {
@@ -59,6 +90,7 @@ function ensureLayer() {
 }
 
 function flashTv() {
+  if (deviceProfile().reduceMotion) return
   const now = Date.now()
   if (now - lastFlash < 900) return
   lastFlash = now
@@ -69,21 +101,24 @@ function flashTv() {
 }
 
 function glitchBurst(hard = false) {
+  if (deviceProfile().reduceMotion && !hard) return
   const now = Date.now()
   if (now - lastGlitch < (hard ? 600 : 1400)) return
   lastGlitch = now
-  document.documentElement.classList.add(hard ? 'dread-glitch-hard' : 'dread-glitch')
+  const useHard = hard && !softMode()
+  document.documentElement.classList.add(useHard ? 'dread-glitch-hard' : 'dread-glitch')
   setTimeout(() => {
     document.documentElement.classList.remove('dread-glitch', 'dread-glitch-hard')
-  }, hard ? 420 : 220)
-  if (hard || Math.random() > 0.5) flashTv()
+  }, useHard ? 420 : 220)
+  if (useHard || Math.random() > 0.5) flashTv()
 }
 
 function shakeSite(hard = false) {
+  if (deviceProfile().reduceMotion) return
   const now = Date.now()
   if (now - lastShake < 1200) return
   lastShake = now
-  document.body.classList.add(hard ? 'shake-hard' : 'dread-shake')
+  document.body.classList.add(hard && !softMode() ? 'shake-hard' : 'dread-shake')
   setTimeout(() => {
     document.body.classList.remove('shake-hard', 'dread-shake')
   }, hard ? 700 : 450)
@@ -119,31 +154,34 @@ function tick() {
 
   const t = tier()
   const intensity = dreadIntensity()
+  const soft = softMode()
   const layer = ensureLayer()
   layer.dataset.tier = String(t)
   layer.style.setProperty('--dread', String(intensity))
+  setAmbientBedVolume(bedVol())
 
-  // Random ambient (sparse → denser with time)
-  if (ambientOn && t >= 1) maybeAmbientSting(intensity)
+  if (ambientOn && t >= 1) maybeAmbientSting(intensity * (soft ? 0.7 : 1))
 
-  // Random visual corruption
-  const glitchChance = 0.04 + t * 0.06 + intensity * 0.08
-  if (Math.random() < glitchChance) glitchBurst(t >= 3)
+  const glitchChance = (0.04 + t * 0.06 + intensity * 0.08) * (soft ? 0.45 : 1)
+  if (Math.random() < glitchChance) glitchBurst(t >= 3 && !soft)
 
-  if (t >= 1 && Math.random() < 0.03 + intensity * 0.05) shakeSite(t >= 3)
-  if (t >= 2 && Math.random() < 0.025 + intensity * 0.04) {
-    whisperOverlay()
-    void playSnippet(CUSTOM_SFX.ghost, 0.22 + intensity * 0.2, 2)
+  if (t >= 1 && Math.random() < (0.03 + intensity * 0.05) * (soft ? 0.5 : 1)) {
+    shakeSite(t >= 3 && !soft)
   }
-  if (t >= 2 && Math.random() < 0.02) flashTv()
-  if (t >= 3 && Math.random() < 0.015 + intensity * 0.03) {
+  if (t >= 2 && Math.random() < (0.025 + intensity * 0.04) * (soft ? 0.6 : 1)) {
+    whisperOverlay()
+    void playSnippet(CUSTOM_SFX.ghost, 0.18 + intensity * 0.18, 2)
+  }
+  if (!soft && t >= 2 && Math.random() < 0.02) flashTv()
+  if (t >= 3 && Math.random() < (0.015 + intensity * 0.03) * (soft ? 0.55 : 1)) {
+    duckAmbientBed(1200)
     jumpscare({ brutality: 0.65 + intensity * 0.35 })
   }
   if (t >= 2 && Math.random() < 0.012) {
-    void playSnippet(CUSTOM_SFX.laugh, 0.2 + intensity * 0.25, 2.4)
+    void playSnippet(CUSTOM_SFX.laugh, 0.18 + intensity * 0.22, 2.4)
   }
   if (t >= 1 && Math.random() < 0.01) {
-    void playSnippet(CUSTOM_SFX.watching, 0.18 + intensity * 0.2, 3.5)
+    void playSnippet(CUSTOM_SFX.watching, 0.16 + intensity * 0.18, 3.5)
   }
 }
 
@@ -158,7 +196,6 @@ function runTenHourEnding() {
   stopAllHauntAudio()
   document.body.classList.add('dread-ending')
   document.documentElement.classList.add('dread-ending')
-  // Freeze scroll
   const scrollY = window.scrollY
   window.scrollTo(0, scrollY)
   const block = (e: Event) => {
@@ -221,22 +258,49 @@ function runTenHourEnding() {
   }, 7000)
 }
 
+function readPersistedStart(): number {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    const n = raw ? Number(raw) : 0
+    if (n > 0 && n <= Date.now()) return n
+  } catch {
+    /* ignore */
+  }
+  return 0
+}
+
+function persistStart(t0: number) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, String(t0))
+  } catch {
+    /* ignore */
+  }
+}
+
 export function startDread() {
   if (startedAt) return
-  startedAt = Date.now()
+  const prior = readPersistedStart()
+  startedAt = prior || Date.now()
+  if (!prior) persistStart(startedAt)
   endingDone = false
   ensureLayer()
-  timer = window.setInterval(tick, 2800)
-  // first quiet beat after a short delay
-  window.setTimeout(() => maybeAmbientSting(0.05), 12000)
+  if (document.body) {
+    document.body.classList.toggle('dread-soft', softMode())
+  }
+  timer = window.setInterval(tick, tickMs())
+  if (ambientOn) {
+    window.setTimeout(() => void startAmbientBed(bedVol()), softMode() ? 4000 : 2500)
+  }
+  window.setTimeout(() => maybeAmbientSting(0.05), softMode() ? 16000 : 12000)
 }
 
 export function stopDread() {
   if (timer != null) window.clearInterval(timer)
   timer = null
   startedAt = 0
+  stopAmbientBed()
   document.querySelectorAll('.dread-layer, .dread-blackout, .dread-whisper, .dread-tv-flash').forEach((el) => el.remove())
-  document.body.classList.remove('dread-ending', 'shake-hard', 'dread-shake')
+  document.body.classList.remove('dread-ending', 'shake-hard', 'dread-shake', 'dread-soft')
   document.documentElement.classList.remove('dread-ending', 'dread-glitch', 'dread-glitch-hard')
 }
 
@@ -245,6 +309,7 @@ export function onDreadScroll() {
   if (!startedAt || endingDone) return
   const t = tier()
   if (t < 1) return
-  if (Math.random() < 0.008 + dreadIntensity() * 0.02) glitchBurst(t >= 3)
+  const soft = softMode()
+  if (Math.random() < (0.008 + dreadIntensity() * 0.02) * (soft ? 0.5 : 1)) glitchBurst(t >= 3 && !soft)
   if (t >= 2 && Math.random() < 0.004) maybeAmbientSting(dreadIntensity())
 }

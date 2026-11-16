@@ -8,6 +8,9 @@ let lastScare = 0
 let lastAmbient = 0
 let activeSources: AudioBufferSourceNode[] = []
 let imgWarm = false
+let bedSource: AudioBufferSourceNode | null = null
+let bedGain: GainNode | null = null
+let bedWanted = false
 
 const bufferCache = new Map<string, AudioBuffer>()
 const inflight = new Map<string, Promise<AudioBuffer | null>>()
@@ -199,6 +202,73 @@ export function stopAllHauntAudio() {
     }
   }
   activeSources = []
+  stopAmbientBed()
+}
+
+function bedCandidates() {
+  return [sfx('heartbeat'), sfx('static'), sfx('breath'), sfx('creak'), CUSTOM_SFX.watching].filter(Boolean)
+}
+
+/** Quiet continuous bed under the collage — ducks during jumpscares. */
+export async function startAmbientBed(volume = 0.045) {
+  bedWanted = true
+  try {
+    const c = ctx()
+    if (c.state === 'suspended') await c.resume()
+    if (bedSource) return
+    const url = pick(bedCandidates())
+    if (!url) return
+    const buf = await loadBuffer(url)
+    if (!buf || !bedWanted) return
+    const src = c.createBufferSource()
+    const g = c.createGain()
+    g.gain.value = volume
+    src.buffer = buf
+    src.loop = true
+    src.connect(g)
+    g.connect(c.destination)
+    src.start(0)
+    bedSource = src
+    bedGain = g
+    src.onended = () => {
+      if (bedSource === src) {
+        bedSource = null
+        bedGain = null
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setAmbientBedVolume(v: number) {
+  if (!bedGain || !ac) return
+  const now = ac.currentTime
+  bedGain.gain.cancelScheduledValues(now)
+  bedGain.gain.linearRampToValueAtTime(Math.max(0, Math.min(0.12, v)), now + 0.35)
+}
+
+export function duckAmbientBed(ms = 900) {
+  if (!bedGain || !ac) return
+  const now = ac.currentTime
+  const cur = bedGain.gain.value
+  bedGain.gain.cancelScheduledValues(now)
+  bedGain.gain.setValueAtTime(cur, now)
+  bedGain.gain.linearRampToValueAtTime(Math.min(0.01, cur * 0.15), now + 0.05)
+  bedGain.gain.linearRampToValueAtTime(cur, now + ms / 1000)
+}
+
+export function stopAmbientBed() {
+  bedWanted = false
+  if (bedSource) {
+    try {
+      bedSource.stop()
+    } catch {
+      /* ignore */
+    }
+  }
+  bedSource = null
+  bedGain = null
 }
 
 /** Unlock audio on ENTER — warm boot tokens + scare beds. */
@@ -418,6 +488,7 @@ export function jumpscare(opts: JumpscareOpts = {}) {
   lastScare = Date.now()
   if (!getBoot()) void loadBoot()
   warmScareImages()
+  duckAmbientBed(1100)
 
   blastAudio(brutality)
 

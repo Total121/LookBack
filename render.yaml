@@ -25,6 +25,8 @@ services:
         value: auto
       - key: REQUIRE_TURNSTILE
         value: "true"
+      # Free FS is ephemeral. For durable uploads: upgrade plan, attach disk at
+      # /var/data, set DATA_ROOT=/var/data (see render.persist.yaml / DEPLOY.md).
       - key: SESSION_TTL_HOURS
         value: "12"
       - key: SESSION_SECRET

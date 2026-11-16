@@ -29,6 +29,8 @@ Serves the obfuscated `dist/` build, vault media via opaque `/m/` tokens, upload
 
 Long-running Node + vault — not a serverless static fit. See [`DEPLOY.md`](./DEPLOY.md).
 
+For durable uploads on a paid host: mount a disk and set `DATA_ROOT` (see `render.persist.yaml`). Free tiers stay ephemeral.
+
 ## Uploads
 
 - Public UPLOAD → description required (max 2000 characters)

@@ -35,7 +35,12 @@ async function toBlobUrl(src: string): Promise<string> {
 export function bindOpaqueImg(
   img: HTMLImageElement,
   src: string,
-  opts: { priority?: 'high' | 'low' | 'auto'; lazy?: boolean } = {},
+  opts: {
+    priority?: 'high' | 'low' | 'auto'
+    lazy?: boolean
+    /** Skip blob cloak (saves a second download on constrained devices). */
+    cloak?: boolean
+  } = {},
 ) {
   img.dataset.mediaSrc = src
   img.alt = ''
@@ -51,6 +56,8 @@ export function bindOpaqueImg(
   }
   img.src = src
 
+  if (opts.cloak === false) return
+
   const cloak = () => {
     if (!img.isConnected || img.dataset.cloaked === '1') return
     const run = () => {
@@ -58,7 +65,6 @@ export function bindOpaqueImg(
         if (!img.isConnected || url === src) return
         img.dataset.cloaked = '1'
         img.src = url
-        // Drop token from DOM attributes after cloak
         delete img.dataset.mediaSrc
       })
     }
