@@ -166,14 +166,22 @@ export function buildCaseDump(count = 400): MurderFile[] {
 }
 
 async function fetchJsonFresh<T>(url: string, bust = Date.now()): Promise<T | null> {
-  try {
-    const join = url.includes('?') ? '&' : '?'
-    const res = await fetch(`${url}${join}v=${bust}`, { cache: 'no-store' })
-    if (!res.ok) return null
-    return (await res.json()) as T
-  } catch {
-    return null
+  const join = url.includes('?') ? '&' : '?'
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await fetch(`${url}${join}v=${bust + attempt}`, { cache: 'no-store' })
+      if (res.status === 429) {
+        const wait = Number(res.headers.get('Retry-After') || 1 + attempt * 2)
+        await new Promise((r) => setTimeout(r, Math.min(8, Math.max(1, wait)) * 1000))
+        continue
+      }
+      if (!res.ok) return null
+      return (await res.json()) as T
+    } catch {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+    }
   }
+  return null
 }
 
 type LibraryRow = {
@@ -198,12 +206,19 @@ let libraryPromise: Promise<LibraryPayload | null> | null = null
 
 function loadLibrary(): Promise<LibraryPayload | null> {
   if (!libraryPromise) {
-    libraryPromise = fetchJsonFresh<LibraryPayload>('/api/library').finally(() => {
-      // allow refresh on next cold boot of feed
-      setTimeout(() => {
-        libraryPromise = null
-      }, 30_000)
-    })
+    libraryPromise = fetchJsonFresh<LibraryPayload>('/api/library')
+      .then((data) => {
+        // Don't cache empty/failed responses — retry next enter
+        if (!data?.photos?.length && !data?.videos?.length) {
+          libraryPromise = null
+        }
+        return data
+      })
+      .finally(() => {
+        setTimeout(() => {
+          libraryPromise = null
+        }, 30_000)
+      })
   }
   return libraryPromise
 }

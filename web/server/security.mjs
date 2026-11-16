@@ -14,11 +14,11 @@ export function clientIp(req) {
     // Prefer Cloudflare's verified connecting IP when present
     const cf = req.headers['cf-connecting-ip']
     if (typeof cf === 'string' && cf.trim()) return cf.trim().slice(0, 64)
-    // Rightmost X-Forwarded-For hop is the one added by the trusted proxy
+    // Single trusted proxy (Render/CF): leftmost XFF is the client
     const xf = req.headers['x-forwarded-for']
     if (typeof xf === 'string' && xf.trim()) {
       const parts = xf.split(',').map((s) => s.trim()).filter(Boolean)
-      if (parts.length) return parts[parts.length - 1].slice(0, 64)
+      if (parts.length) return parts[0].slice(0, 64)
     }
     const real = req.headers['x-real-ip']
     if (typeof real === 'string' && real.trim()) return real.trim().slice(0, 64)
@@ -94,20 +94,21 @@ function isHttps(req) {
   return proto === 'https' || req.socket?.encrypted === true
 }
 
-/** Simple per-IP throttle for anonymous API scraping. */
-const apiHits = new Map()
-export function apiRateLimit(ip, { max = 120, windowMs = 60_000 } = {}) {
+/** Per-bucket per-IP throttle (library/boot must not share a tiny counter with everything). */
+const apiBuckets = new Map()
+export function apiRateLimit(ip, { max = 120, windowMs = 60_000, bucket = 'api' } = {}) {
   const now = Date.now()
-  const arr = (apiHits.get(ip) || []).filter((t) => now - t < windowMs)
+  const key = `${bucket}:${ip}`
+  const arr = (apiBuckets.get(key) || []).filter((t) => now - t < windowMs)
   if (arr.length >= max) {
-    apiHits.set(ip, arr)
+    apiBuckets.set(key, arr)
     return {
       ok: false,
       retryAfter: Math.max(1, Math.ceil((arr[0] + windowMs - now) / 1000)),
     }
   }
   arr.push(now)
-  apiHits.set(ip, arr)
+  apiBuckets.set(key, arr)
   return { ok: true, retryAfter: 0 }
 }
 

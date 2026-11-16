@@ -394,7 +394,7 @@ export async function handleMediaApi(req, res) {
 
   if (url === '/api/boot' && req.method === 'GET') {
     const ip = clientIp(req)
-    const gate = apiRateLimit(ip, { max: 60, windowMs: 60_000 })
+    const gate = apiRateLimit(ip, { max: 120, windowMs: 60_000, bucket: 'boot' })
     if (!gate.ok) {
       res.setHeader('Retry-After', String(gate.retryAfter))
       sendJson(res, 429, { ok: false, error: 'too many requests' })
@@ -419,7 +419,7 @@ export async function handleMediaApi(req, res) {
 
   if (url === '/api/library' && req.method === 'GET') {
     const ip = clientIp(req)
-    const gate = apiRateLimit(ip, { max: 40, windowMs: 60_000 })
+    const gate = apiRateLimit(ip, { max: 120, windowMs: 60_000, bucket: 'library' })
     if (!gate.ok) {
       res.setHeader('Retry-After', String(gate.retryAfter))
       sendJson(res, 429, { ok: false, error: 'too many requests' })

@@ -147,10 +147,15 @@ export function createAppHandler({ isProd = false } = {}) {
         )
       }
 
-      // Global anonymous API throttle
+      // Global anonymous API throttle (library/boot use their own higher buckets)
       if (pathname.startsWith('/api/')) {
         const ip = clientIp(req)
-        const gate = apiRateLimit(ip, { max: 180, windowMs: 60_000 })
+        const isEssential = pathname === '/api/library' || pathname === '/api/boot' || pathname === '/api/public/config'
+        const gate = apiRateLimit(ip, {
+          max: isEssential ? 240 : 240,
+          windowMs: 60_000,
+          bucket: isEssential ? 'essential' : 'api',
+        })
         if (!gate.ok) {
           res.setHeader('Retry-After', String(gate.retryAfter))
           sendJson(res, 429, { ok: false, error: 'too many requests' })
